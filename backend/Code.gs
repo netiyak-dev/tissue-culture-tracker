@@ -36,7 +36,7 @@ const SHEET_SCHEMAS = {
   ],
   Storage: ["type", "value", "active"],
   Transfers: [
-    "record_id", "plant_id", "plant_name", "round_no", "transfer_date", "quantity",
+    "record_id", "plant_id", "plant_name", "lot_no", "round_no", "transfer_date", "quantity",
     "media_type", "bottle_no", "shelf", "sub_shelf",
     "stage", "recipe_used", "next_transfer_date", "recorded_by", "created_at",
   ],
@@ -162,8 +162,8 @@ function doPost(e) {
       recordTransfer,
       listLineUsers,
       getDashboard,
-      listActiveBottles,
-      getBottleHistory,
+      listActiveLots,
+      getLotHistory,
     };
     if (!handlers[action]) throw new Error("ไม่รู้จัก action: " + action);
     const result = handlers[action](payload);
@@ -206,14 +206,14 @@ function listPlantsWithCount() {
   const plants = getSheetData("PlantTypes").filter(p => p.active !== false);
   const transfers = getSheetData("Transfers");
   return plants.map(p => {
-    const latestByPosition = {};
-    transfers.filter(t => t.plant_id === p.plant_id).forEach(t => {
-      const key = t.shelf + "|" + t.sub_shelf;
-      if (!latestByPosition[key] || new Date(t.transfer_date) > new Date(latestByPosition[key].transfer_date)) {
-        latestByPosition[key] = t;
+    const latestByLot = {};
+    transfers.filter(t => t.plant_id === p.plant_id && t.lot_no).forEach(t => {
+      const key = t.lot_no;
+      if (!latestByLot[key] || new Date(t.transfer_date) > new Date(latestByLot[key].transfer_date)) {
+        latestByLot[key] = t;
       }
     });
-    const activeCount = Object.values(latestByPosition).filter(t => !!t.next_transfer_date).length;
+    const activeCount = Object.values(latestByLot).filter(t => !!t.next_transfer_date).length;
     return { plant_id: p.plant_id, plant_name: p.plant_name, active_count: activeCount };
   });
 }
@@ -289,7 +289,7 @@ function deactivateStorageValue(payload) {
 // Handler หลัก: บันทึกการถ่ายโอนเนื้อเยื่อ + คำนวณระยะ/สูตร/วันถัดไปอัตโนมัติ
 // ===================================================================
 function recordTransfer(payload) {
-  const required = ["plant_id", "quantity", "shelf", "sub_shelf", "media_type"];
+  const required = ["plant_id", "lot_no", "quantity", "shelf", "sub_shelf", "media_type"];
   required.forEach(f => {
     if (payload[f] === undefined || payload[f] === "") throw new Error("กรุณากรอกข้อมูลให้ครบ: " + f);
   });
@@ -304,12 +304,15 @@ function recordTransfer(payload) {
   const plant = plants.find(p => p.plant_id === payload.plant_id);
   if (!plant) throw new Error("ไม่พบชนิดพืชนี้");
 
+  // ระบุรอบที่ด้วย (plant_id, lot_no) ไม่ใช้ตำแหน่งเก็บ (shelf/sub_shelf) อีกต่อไป
+  // เพราะล็อตเดียวกันอาจย้ายตำแหน่งเก็บได้ระหว่างรอบ — ตำแหน่งเป็นแค่ metadata ของรอบนั้นๆ
+  // ถ้า lot_no นี้เคยจบไปแล้ว (แถวล่าสุดไม่มี next_transfer_date) จะถือเป็นล็อตใหม่ เริ่มรอบที่ 1 ใหม่
   const transfers = getSheetData("Transfers");
-  const sameSpot = transfers.filter(t =>
-    t.plant_id === payload.plant_id && String(t.shelf) === String(payload.shelf) && String(t.sub_shelf) === String(payload.sub_shelf)
+  const sameLot = transfers.filter(t =>
+    t.plant_id === payload.plant_id && String(t.lot_no) === String(payload.lot_no)
   );
   let previous = null;
-  sameSpot.forEach(t => {
+  sameLot.forEach(t => {
     if (t.next_transfer_date && (!previous || new Date(t.transfer_date) > new Date(previous.transfer_date))) {
       previous = t;
     }
@@ -344,6 +347,7 @@ function recordTransfer(payload) {
     record_id: genId("rec"),
     plant_id: plant.plant_id,
     plant_name: plant.plant_name,
+    lot_no: payload.lot_no,
     round_no,
     transfer_date: formatThaiDate(today),
     quantity: payload.quantity,
@@ -362,6 +366,7 @@ function recordTransfer(payload) {
   notifyAdminNewRecord(record, round_in_stage);
 
   return {
+    lot_no: record.lot_no,
     stage,
     recipe_used,
     next_transfer_date,
@@ -377,7 +382,7 @@ function notifyAdminNewRecord(record, round_in_stage) {
     if (!adminId) return;
     const lines = [
       "📝 มีการบันทึกถ่ายโอนเนื้อเยื่อใหม่",
-      `${record.plant_name} — ${record.stage} (รอบที่ ${round_in_stage})`,
+      `${record.plant_name} — ล็อต ${record.lot_no} — ${record.stage} (รอบที่ ${round_in_stage})`,
       `ประเภท: ${record.media_type}${record.bottle_no ? " · ขวดเลขที่ " + record.bottle_no : ""}`,
       `ที่เก็บ: ชั้น ${record.shelf}/${record.sub_shelf} · จำนวน ${record.quantity} ต้น`,
       `บันทึกโดย: ${record.recorded_by}`,
@@ -396,20 +401,22 @@ function getDashboard() {
   const plants = getSheetData("PlantTypes");
   const storage = getSheetData("Storage").filter(s => s.active !== false);
 
-  const latestByPosition = {};
+  // นับ "ล็อต" ที่กำลังติดตามอยู่ ไม่ใช่ตำแหน่งเก็บ — แถวเก่าที่ไม่มี lot_no (ก่อนอัปเดตฟีเจอร์นี้) ถูกข้าม
+  const latestByLot = {};
   transfers.forEach(t => {
-    const key = t.plant_id + "|" + t.shelf + "|" + t.sub_shelf;
-    if (!latestByPosition[key] || new Date(t.transfer_date) > new Date(latestByPosition[key].transfer_date)) {
-      latestByPosition[key] = t;
+    if (!t.lot_no) return;
+    const key = t.plant_id + "|" + t.lot_no;
+    if (!latestByLot[key] || new Date(t.transfer_date) > new Date(latestByLot[key].transfer_date)) {
+      latestByLot[key] = t;
     }
   });
-  const activeBottles = Object.values(latestByPosition).filter(t => !!t.next_transfer_date);
+  const activeLots = Object.values(latestByLot).filter(t => !!t.next_transfer_date);
 
-  const total_bottles = activeBottles.length;
-  const total_plants = activeBottles.reduce((sum, t) => sum + Number(t.quantity || 0), 0);
+  const total_lots = activeLots.length;
+  const total_plants = activeLots.reduce((sum, t) => sum + Number(t.quantity || 0), 0);
 
   const now = new Date();
-  const withDays = activeBottles
+  const withDays = activeLots
     .map(t => ({ ...t, _daysLeft: (parseThaiDateApprox(t.next_transfer_date) - now) / 86400000 }))
     .filter(t => t._daysLeft <= 3)
     .sort((a, b) => a._daysLeft - b._daysLeft)
@@ -423,6 +430,7 @@ function getDashboard() {
     else if (t.stage === STAGE_NAMES[1]) round_in_stage = "1/1";
     return {
       plant_name: t.plant_name,
+      lot_no: t.lot_no,
       shelf: t.shelf,
       sub_shelf: t.sub_shelf,
       media_type: t.media_type,
@@ -435,11 +443,11 @@ function getDashboard() {
   });
 
   const by_plant = plants.filter(p => p.active !== false).map(p => {
-    const bottles = activeBottles.filter(t => t.plant_id === p.plant_id);
+    const lots = activeLots.filter(t => t.plant_id === p.plant_id);
     const stage_counts = { "ขยาย": 0, "กระตุ้นราก": 0, "พร้อมออกปลูก": 0 };
-    bottles.forEach(t => { stage_counts[t.stage] = (stage_counts[t.stage] || 0) + 1; });
+    lots.forEach(t => { stage_counts[t.stage] = (stage_counts[t.stage] || 0) + 1; });
     const dominant_stage = Object.keys(stage_counts).reduce((a, b) => stage_counts[a] >= stage_counts[b] ? a : b, "ขยาย");
-    return { plant_name: p.plant_name, total: bottles.length, stage_counts, dominant_stage };
+    return { plant_name: p.plant_name, total: lots.length, stage_counts, dominant_stage };
   });
 
   const shelves = storage.filter(s => s.type === "shelf").map(s => s.value);
@@ -447,32 +455,34 @@ function getDashboard() {
   const storage_overview = [];
   shelves.forEach(shelf => {
     subs.forEach(sub => {
-      const count = activeBottles.filter(t => String(t.shelf) === String(shelf) && String(t.sub_shelf) === String(sub)).length;
+      const count = activeLots.filter(t => String(t.shelf) === String(shelf) && String(t.sub_shelf) === String(sub)).length;
       storage_overview.push({ shelf, sub_shelf: sub, count });
     });
   });
 
-  return { total_bottles, total_plants, due_soon, by_plant, storage_overview };
+  return { total_lots, total_plants, due_soon, by_plant, storage_overview };
 }
 
 // ===================================================================
-// Handlers: ประวัติย้อนหลังของขวด (track ว่าทำ subculture มากี่รอบแล้ว)
+// Handlers: ประวัติย้อนหลังของล็อต (track ว่าทำ subculture มากี่รอบแล้ว)
 // ===================================================================
 
-/** รายการขวดที่ "กำลังติดตามอยู่" ของชนิดพืชหนึ่ง (ยังไม่ถึงระยะพร้อมออกปลูก) */
-function listActiveBottles(payload) {
+/** รายการล็อตที่ "กำลังติดตามอยู่" ของชนิดพืชหนึ่ง (ยังไม่ถึงระยะพร้อมออกปลูก) */
+function listActiveLots(payload) {
   if (!payload.plant_id) throw new Error("กรุณาระบุชนิดพืช");
   const transfers = getSheetData("Transfers").filter(t => t.plant_id === payload.plant_id);
-  const latestByPosition = {};
+  const latestByLot = {};
   transfers.forEach(t => {
-    const key = t.shelf + "|" + t.sub_shelf;
-    if (!latestByPosition[key] || new Date(t.transfer_date) > new Date(latestByPosition[key].transfer_date)) {
-      latestByPosition[key] = t;
+    if (!t.lot_no) return; // ข้ามแถวเก่าที่ไม่มี lot_no (ข้อมูลก่อนอัปเดตฟีเจอร์นี้)
+    const key = t.lot_no;
+    if (!latestByLot[key] || new Date(t.transfer_date) > new Date(latestByLot[key].transfer_date)) {
+      latestByLot[key] = t;
     }
   });
-  return Object.values(latestByPosition)
+  return Object.values(latestByLot)
     .filter(t => !!t.next_transfer_date)
     .map(t => ({
+      lot_no: t.lot_no,
       shelf: t.shelf,
       sub_shelf: t.sub_shelf,
       round_no: t.round_no,
@@ -481,18 +491,17 @@ function listActiveBottles(payload) {
       bottle_no: t.bottle_no,
       next_transfer_date: t.next_transfer_date,
     }))
-    .sort((a, b) => String(a.shelf) + String(a.sub_shelf) > String(b.shelf) + String(b.sub_shelf) ? 1 : -1);
+    .sort((a, b) => String(a.lot_no) > String(b.lot_no) ? 1 : -1);
 }
 
 /**
- * ประวัติทุกรอบของขวดเดียว (ไล่ย้อนจากรอบปัจจุบันกลับไปรอบที่ 1)
- * เดินตามตรรกะเดียวกับ recordTransfer (อิงตำแหน่ง + รอบที่ติดกัน) เพื่อไม่ปนกับ
- * ขวดเก่าที่เคยอยู่ตำแหน่งเดียวกันแล้วจบไปก่อนหน้า (กรณีใช้ตำแหน่งซ้ำ)
+ * ประวัติทุกรอบของล็อตเดียว (ไล่ย้อนจากรอบปัจจุบันกลับไปรอบที่ 1)
+ * อิงรอบที่ตาม (plant_id, lot_no) ไม่ใช่ตำแหน่งเก็บ — เพราะล็อตอาจย้ายชั้น/ช่องระหว่างรอบได้
  */
-function getBottleHistory(payload) {
-  if (!payload.plant_id || !payload.shelf || !payload.sub_shelf) throw new Error("ข้อมูลไม่ครบ");
+function getLotHistory(payload) {
+  if (!payload.plant_id || !payload.lot_no) throw new Error("ข้อมูลไม่ครบ");
   const transfers = getSheetData("Transfers").filter(t =>
-    t.plant_id === payload.plant_id && String(t.shelf) === String(payload.shelf) && String(t.sub_shelf) === String(payload.sub_shelf)
+    t.plant_id === payload.plant_id && String(t.lot_no) === String(payload.lot_no)
   );
   let current = null;
   transfers.forEach(t => {
@@ -519,6 +528,8 @@ function getBottleHistory(payload) {
     stage: t.stage,
     media_type: t.media_type,
     bottle_no: t.bottle_no,
+    shelf: t.shelf,
+    sub_shelf: t.sub_shelf,
     quantity: t.quantity,
     recipe_used: t.recipe_used,
     next_transfer_date: t.next_transfer_date,
@@ -562,9 +573,9 @@ function sendDueReminders() {
   if (dueTodayTomorrow.length === 0) return;
 
   const lines = dueTodayTomorrow.map(d =>
-    `• ${d.plant_name} — ชั้น ${d.shelf}/${d.sub_shelf}\n  สูตรรอบหน้า: ${d.next_recipe || "-"}`
+    `• ${d.plant_name} — ล็อต ${d.lot_no} — ชั้น ${d.shelf}/${d.sub_shelf}\n  สูตรรอบหน้า: ${d.next_recipe || "-"}`
   );
-  const message = `🌱 แจ้งเตือนถ่ายโอนเนื้อเยื่อ\nวันนี้/พรุ่งนี้ถึงกำหนด ${dueTodayTomorrow.length} ขวด:\n\n${lines.join("\n\n")}`;
+  const message = `🌱 แจ้งเตือนถ่ายโอนเนื้อเยื่อ\nวันนี้/พรุ่งนี้ถึงกำหนด ${dueTodayTomorrow.length} ล็อต:\n\n${lines.join("\n\n")}`;
 
   const users = getSheetData("LineUsers").filter(u => u.active !== false).map(u => u.line_user_id);
   if (users.length === 0) return;

@@ -145,6 +145,7 @@ p { line-height: 1.6; margin: 0 0 var(--space-3) 0; }
   cursor: pointer;
 }
 .card-tap:active { background: var(--mint); }
+.card-tap.active { background: var(--mint); border-color: var(--leaf); }
 
 .card-tap .plant-name { font-weight: 600; font-size: 16px; color: var(--text); }
 .card-tap .plant-count { font-size: 13px; color: var(--text-muted); margin-top: 2px; }

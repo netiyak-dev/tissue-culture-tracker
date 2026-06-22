@@ -30,8 +30,24 @@
     </div>
 
     <div class="field">
+      <label>หมายเลขล็อต</label>
+      <div id="lot-mode-grid" class="chip-grid chip-grid-2">
+        <div class="chip chip-lg active" data-lot-mode="new">ล็อตใหม่</div>
+        <div class="chip chip-lg" data-lot-mode="existing">เลือกล็อตที่มีอยู่</div>
+      </div>
+    </div>
+
+    <div class="field" id="lot-new-field">
+      <input type="text" id="lot-no-input" placeholder="เช่น 7" />
+    </div>
+
+    <div class="field hidden" id="lot-existing-field">
+      <div id="lot-list"></div>
+    </div>
+
+    <div class="field">
       <label>จำนวนต้นที่ทำได้ (ต้น)</label>
-      <input type="number" id="quantity" inputmode="numeric" min="1" placeholder="เช่น 24" />
+      <input type="number" id="quantity" inputmode="numeric" min="1" value="20" placeholder="เช่น 24" />
     </div>
 
     <div class="field">
@@ -61,7 +77,7 @@
   </div>
 
   <div id="after-actions" class="hidden">
-    <button id="record-next-btn" class="btn btn-primary btn-block">บันทึกขวดถัดไป</button>
+    <button id="record-next-btn" class="btn btn-primary btn-block">บันทึกอีกรายการ</button>
     <a href="index.html" class="btn btn-outline btn-block">กลับหน้าหลัก</a>
   </div>
 
@@ -74,6 +90,8 @@ let selectedSub = null;
 let selectedMedia = null;
 let plantsCache = [];
 let storageCache = { shelves: [], subs: [] };
+let lotMode = "new";
+let selectedLotNo = null;
 
 function renderChips(container, items, onPick, addLabel) {
   container.innerHTML = "";
@@ -120,6 +138,52 @@ document.querySelectorAll("#media-type-grid .chip").forEach(chip => {
   });
 });
 
+// ---------- เลือกล็อตใหม่ / ล็อตที่มีอยู่ ----------
+document.querySelectorAll("#lot-mode-grid .chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll("#lot-mode-grid .chip").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    lotMode = chip.dataset.lotMode;
+    document.getElementById("lot-new-field").classList.toggle("hidden", lotMode !== "new");
+    document.getElementById("lot-existing-field").classList.toggle("hidden", lotMode !== "existing");
+    if (lotMode === "existing") loadActiveLots();
+  });
+});
+
+async function loadActiveLots() {
+  const plant_id = document.getElementById("plant-select").value;
+  const list = document.getElementById("lot-list");
+  selectedLotNo = null;
+  if (!plant_id) {
+    list.innerHTML = '<p class="muted">กรุณาเลือกชนิดพืชก่อน</p>';
+    return;
+  }
+  list.innerHTML = '<p class="muted">กำลังโหลด...</p>';
+  const lots = await TissueApp.call("listActiveLots", { plant_id });
+  list.innerHTML = "";
+  if (lots.length === 0) {
+    list.innerHTML = '<p class="muted">ชนิดนี้ยังไม่มีล็อตที่กำลังติดตามอยู่</p>';
+    return;
+  }
+  lots.forEach(l => {
+    const card = document.createElement("div");
+    card.className = "card card-tap";
+    card.innerHTML = `
+      <div>
+        <div class="plant-name">ล็อต ${l.lot_no}</div>
+        <div class="plant-count">${l.stage} · รอบที่ ${l.round_no} · ชั้น ${l.shelf}/${l.sub_shelf} · ครบกำหนด ${l.next_transfer_date}</div>
+      </div>
+      <div class="chevron">›</div>
+    `;
+    card.addEventListener("click", () => {
+      document.querySelectorAll("#lot-list .card").forEach(c => c.classList.remove("active"));
+      card.classList.add("active");
+      selectedLotNo = l.lot_no;
+    });
+    list.appendChild(card);
+  });
+}
+
 async function loadStorage() {
   storageCache = await TissueApp.call("listStorage");
   renderChips(document.getElementById("shelf-grid"), storageCache.shelves, pickShelf, "ชั้นใหม่ (เช่น 5)");
@@ -147,14 +211,19 @@ function updateTitle() {
   document.getElementById("plant-title").textContent = plant ? plant.plant_name : "บันทึกการถ่ายโอน";
 }
 
-document.getElementById("plant-select").addEventListener("change", updateTitle);
+document.getElementById("plant-select").addEventListener("change", () => {
+  updateTitle();
+  if (lotMode === "existing") loadActiveLots();
+});
 
 document.getElementById("save-btn").addEventListener("click", async () => {
   const plant_id = document.getElementById("plant-select").value;
   const quantity = document.getElementById("quantity").value;
   const bottle_no = document.getElementById("bottle-no").value.trim();
+  const lot_no = lotMode === "new" ? document.getElementById("lot-no-input").value.trim() : selectedLotNo;
 
   if (!plant_id) return alert("กรุณาเลือกชนิดพืช");
+  if (!lot_no) return alert(lotMode === "new" ? "กรุณาพิมพ์หมายเลขล็อต" : "กรุณาเลือกล็อตที่มีอยู่");
   if (!quantity || Number(quantity) <= 0) return alert("กรุณาใส่จำนวนต้นที่ทำได้");
   if (!selectedMedia) return alert("กรุณาเลือกประเภทรอบนี้ (TIB หรือ SS)");
   if (selectedMedia === "TIB" && !bottle_no) return alert("กรุณาใส่หมายเลขขวด (จำเป็นสำหรับ TIB)");
@@ -166,6 +235,7 @@ document.getElementById("save-btn").addEventListener("click", async () => {
   try {
     const result = await TissueApp.call("recordTransfer", {
       plant_id,
+      lot_no,
       quantity: Number(quantity),
       media_type: selectedMedia,
       bottle_no: selectedMedia === "TIB" ? bottle_no : "",
@@ -179,7 +249,7 @@ document.getElementById("save-btn").addEventListener("click", async () => {
     const banner = document.getElementById("result-banner");
     banner.classList.remove("hidden");
 
-    let detail = `ระยะ: ${result.stage} (รอบที่ ${result.round_in_stage}) · สูตร: ${result.recipe_used}`;
+    let detail = `ล็อต ${result.lot_no} · ระยะ: ${result.stage} (รอบที่ ${result.round_in_stage}) · สูตร: ${result.recipe_used}`;
     detail += ` · ประเภท: ${result.media_type}`;
     if (result.bottle_no) detail += ` (ขวดเลขที่ ${result.bottle_no})`;
     detail += result.next_transfer_date
@@ -197,10 +267,18 @@ document.getElementById("record-next-btn").addEventListener("click", () => {
   document.getElementById("form-wrap").classList.remove("hidden");
   document.getElementById("after-actions").classList.add("hidden");
   document.getElementById("result-banner").classList.add("hidden");
-  document.getElementById("quantity").value = "";
+  document.getElementById("quantity").value = "20";
   document.getElementById("bottle-no").value = "";
   document.getElementById("bottle-no-field").classList.add("hidden");
+  document.getElementById("lot-no-input").value = "";
+  document.getElementById("lot-list").innerHTML = "";
   document.querySelectorAll("#media-type-grid .chip").forEach(c => c.classList.remove("active"));
+  document.querySelectorAll("#lot-mode-grid .chip").forEach(c => c.classList.remove("active"));
+  document.querySelector('#lot-mode-grid .chip[data-lot-mode="new"]').classList.add("active");
+  document.getElementById("lot-new-field").classList.remove("hidden");
+  document.getElementById("lot-existing-field").classList.add("hidden");
+  lotMode = "new";
+  selectedLotNo = null;
   selectedShelf = null;
   selectedSub = null;
   selectedMedia = null;

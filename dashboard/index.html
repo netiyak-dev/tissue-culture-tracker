@@ -17,7 +17,7 @@
   </div>
 
   <div class="stat-row" id="stat-row">
-    <div class="stat-box"><div class="num">–</div><div class="label">ขวดทั้งหมด</div></div>
+    <div class="stat-box"><div class="num">–</div><div class="label">ล็อตทั้งหมด</div></div>
     <div class="stat-box"><div class="num">–</div><div class="label">ต้นรวม</div></div>
     <div class="stat-box"><div class="num">–</div><div class="label">ใกล้ถึงกำหนด</div></div>
   </div>
@@ -67,7 +67,7 @@ async function loadDashboard() {
     // แถบสรุป
     const statRow = document.getElementById("stat-row");
     statRow.innerHTML = `
-      <div class="stat-box"><div class="num">${data.total_bottles}</div><div class="label">ขวดทั้งหมด</div></div>
+      <div class="stat-box"><div class="num">${data.total_lots}</div><div class="label">ล็อตทั้งหมด</div></div>
       <div class="stat-box"><div class="num">${data.total_plants}</div><div class="label">ต้นรวม</div></div>
       <div class="stat-box"><div class="num">${data.due_soon.length}</div><div class="label">ใกล้ถึงกำหนด</div></div>
     `;
@@ -75,13 +75,13 @@ async function loadDashboard() {
     // ใกล้ถึงกำหนด
     const dueList = document.getElementById("due-list");
     if (data.due_soon.length === 0) {
-      dueList.innerHTML = '<p class="muted">ไม่มีขวดที่ใกล้ถึงกำหนดในช่วงนี้</p>';
+      dueList.innerHTML = '<p class="muted">ไม่มีล็อตที่ใกล้ถึงกำหนดในช่วงนี้</p>';
     } else {
       dueList.innerHTML = data.due_soon.map(d => `
         <div class="due-item">
           <div>
             <div class="name">${d.plant_name} <span class="muted">(${d.stage} ${d.round_in_stage})</span></div>
-            <div class="loc">ชั้น ${d.shelf}/${d.sub_shelf} · ${d.media_type}${d.bottle_no ? " #" + d.bottle_no : ""} · สูตรรอบหน้า: ${d.next_recipe || "-"}</div>
+            <div class="loc">ล็อต ${d.lot_no} · ชั้น ${d.shelf}/${d.sub_shelf} · ${d.media_type}${d.bottle_no ? " #" + d.bottle_no : ""} · สูตรรอบหน้า: ${d.next_recipe || "-"}</div>
           </div>
           <div class="date">${d.next_transfer_date}</div>
         </div>
@@ -92,7 +92,7 @@ async function loadDashboard() {
     const plantOverview = document.getElementById("plant-overview");
     plantOverview.innerHTML = data.by_plant.map(p => `
       <div class="card">
-        <h3>${p.plant_name} <span class="muted">· ${p.total} ขวด</span></h3>
+        <h3>${p.plant_name} <span class="muted">· ${p.total} ล็อต</span></h3>
         ${stageStepper(p.dominant_stage)}
         <div class="muted">ขยาย ${p.stage_counts.ขยาย} · กระตุ้นราก ${p.stage_counts.กระตุ้นราก} · พร้อมออกปลูก ${p.stage_counts.พร้อมออกปลูก}</div>
       </div>
