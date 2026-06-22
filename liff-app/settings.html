@@ -20,7 +20,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="plants">ชนิดพืช</div>
     <div class="tab" data-tab="storage">ที่เก็บ</div>
-    <div class="tab" data-tab="notify">ผู้รับแจ้งเตือน</div>
+    <div class="tab hidden" id="tab-permissions" data-tab="permissions">สิทธิ์ผู้ใช้</div>
   </div>
 
   <!-- แท็บ 1: ชนิดพืช -->
@@ -38,14 +38,10 @@
     <p class="muted" style="margin-top:16px;">กดปุ่ม "+ เพิ่ม" เพื่อเพิ่มชั้น/ช่องใหม่ได้ทุกเมื่อ ไม่ต้องพึ่งช่างไอที</p>
   </div>
 
-  <!-- แท็บ 3: ผู้รับแจ้งเตือน -->
-  <div class="tab-panel" id="panel-notify">
-    <p class="muted">รายชื่อคนที่เปิดแอปนี้ผ่าน Line แล้ว จะได้รับการแจ้งเตือนอัตโนมัติทุกเช้า</p>
-    <div id="notify-list"></div>
-    <div class="card" style="margin-top:8px;">
-      <h3>ตั้งแอดมิน (PI) รับแจ้งเตือนทันที</h3>
-      <p class="muted">แตะที่ Line ID ของตัวเองด้านบนเพื่อคัดลอก แล้วนำไปวางใน Script Properties ชื่อ <b>ADMIN_LINE_USER_ID</b> ในหน้า Apps Script (ทำครั้งเดียว ไม่ต้องทำซ้ำ)</p>
-    </div>
+  <!-- แท็บ 3: สิทธิ์ผู้ใช้ (แอดมินเท่านั้น) -->
+  <div class="tab-panel" id="panel-permissions">
+    <p class="muted">รายชื่อคนที่เปิดแอปนี้ผ่าน Line แล้ว — ตั้ง Lab และสิทธิ์ได้ที่นี่ Admin จะเห็นข้อมูลทุก Lab และได้รับแจ้งเตือนทุกครั้งที่มีการบันทึก ส่วน User เห็นเฉพาะ Lab ของตัวเอง</p>
+    <div id="permissions-list"></div>
   </div>
 
 </div>
@@ -260,24 +256,60 @@ function renderStorageChips(container, items, type, promptText) {
   container.appendChild(addChip);
 }
 
-// ---------- แท็บผู้รับแจ้งเตือน ----------
-async function loadNotifySettings() {
-  const list = document.getElementById("notify-list");
+// ---------- แท็บสิทธิ์ผู้ใช้ (แอดมินเท่านั้น) — ใช้ LABS ตัวเดียวกับที่ประกาศไว้ใน js/api.js ----------
+async function loadPermissionsSettings() {
+  const list = document.getElementById("permissions-list");
   list.innerHTML = '<p class="muted">กำลังโหลด...</p>';
-  const users = await TissueApp.call("listLineUsers");
+  const users = await TissueApp.call("listUsers");
   list.innerHTML = "";
   if (users.length === 0) {
-    list.innerHTML = '<p class="muted">ยังไม่มีใครเปิดผ่าน Line — เปิดแอปนี้จาก Line อย่างน้อย 1 ครั้งเพื่อรับแจ้งเตือน</p>';
+    list.innerHTML = '<p class="muted">ยังไม่มีใครเปิดผ่าน Line</p>';
     return;
   }
   users.forEach(u => {
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `
-      <div class="plant-name">${u.display_name}</div>
-      <div class="muted">${u.active ? "รับแจ้งเตือนอยู่" : "ปิดแจ้งเตือนแล้ว"}</div>
-      <div class="muted" style="margin-top:6px;word-break:break-all;cursor:pointer;border:1px dashed var(--border);border-radius:8px;padding:6px 8px;" data-line-id="${u.line_user_id}">${u.line_user_id}</div>
+      <div class="plant-name">${u.display_name} ${u.active ? "" : '<span class="muted">(ปิดใช้งาน)</span>'}</div>
+      <div class="muted" style="margin:6px 0 4px;">Lab</div>
+      <div class="chip-grid lab-grid" style="grid-template-columns:repeat(3,1fr);"></div>
+      <div class="muted" style="margin:10px 0 4px;">สิทธิ์</div>
+      <div class="chip-grid role-grid" style="grid-template-columns:repeat(2,1fr);"></div>
+      <div class="muted" style="margin-top:10px;word-break:break-all;cursor:pointer;border:1px dashed var(--border);border-radius:8px;padding:6px 8px;" data-line-id="${u.line_user_id}">${u.line_user_id}</div>
     `;
+
+    const labGrid = card.querySelector(".lab-grid");
+    LABS.forEach(lab => {
+      const chip = document.createElement("div");
+      chip.className = "chip" + (u.lab === lab ? " active" : "");
+      chip.textContent = lab;
+      chip.addEventListener("click", async () => {
+        try {
+          await TissueApp.call("setUserPermissions", { target_line_user_id: u.line_user_id, lab });
+          await loadPermissionsSettings();
+        } catch (err) {
+          alert("เปลี่ยน Lab ไม่สำเร็จ: " + err.message);
+        }
+      });
+      labGrid.appendChild(chip);
+    });
+
+    const roleGrid = card.querySelector(".role-grid");
+    [["user", "User"], ["admin", "Admin"]].forEach(([value, label]) => {
+      const chip = document.createElement("div");
+      chip.className = "chip" + (u.role === value ? " active" : "");
+      chip.textContent = label;
+      chip.addEventListener("click", async () => {
+        try {
+          await TissueApp.call("setUserPermissions", { target_line_user_id: u.line_user_id, role: value });
+          await loadPermissionsSettings();
+        } catch (err) {
+          alert("เปลี่ยนสิทธิ์ไม่สำเร็จ: " + err.message);
+        }
+      });
+      roleGrid.appendChild(chip);
+    });
+
     const idBox = card.querySelector("[data-line-id]");
     idBox.addEventListener("click", async () => {
       try {
@@ -294,7 +326,12 @@ async function loadNotifySettings() {
 
 (async () => {
   await TissueApp.init();
-  await Promise.all([loadPlantSettings(), loadStorageSettings(), loadNotifySettings()]);
+  const tasks = [loadPlantSettings(), loadStorageSettings()];
+  if (TissueApp.isAdmin()) {
+    document.getElementById("tab-permissions").classList.remove("hidden");
+    tasks.push(loadPermissionsSettings());
+  }
+  await Promise.all(tasks);
 })();
 </script>
 </body>

@@ -15,6 +15,7 @@
   <div class="topbar">
     <a href="#" id="back-btn" class="back-btn">‹</a>
     <h1 id="page-title">ประวัติการถ่ายโอน</h1>
+    <span class="lab-badge hidden" id="lab-badge"></span>
   </div>
 
   <!-- ขั้นที่ 1: เลือกชนิดพืช -->
@@ -154,6 +155,9 @@ async function loadTimeline(plant_id, plant_name, lot_no) {
 
 (async () => {
   await TissueApp.init();
+  const badge = document.getElementById("lab-badge");
+  badge.textContent = TissueApp.isAdmin() ? "ทุก Lab" : "Lab " + TissueApp.myLab;
+  badge.classList.remove("hidden");
   const qPlant = TissueApp.getParam("plant_id");
   const qLotNo = TissueApp.getParam("lot_no");
   if (qPlant && qLotNo) {

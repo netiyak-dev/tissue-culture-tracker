@@ -7,7 +7,9 @@
  * ก่อนใช้งาน ต้องตั้งค่า Script Properties (Project Settings > Script Properties):
  *   SPREADSHEET_ID              -> ID ของ Google Sheet ที่จะใช้เป็นฐานข้อมูล (จำเป็น)
  *   LINE_CHANNEL_ACCESS_TOKEN   -> Channel access token ของ LINE Messaging API (จำเป็น)
- *   ADMIN_LINE_USER_ID          -> LINE user ID ของแอดมิน/PI ที่จะได้รับแจ้งเตือนทันทีทุกครั้งที่มีการบันทึก (ไม่ใส่ก็ได้ ถ้าไม่ใส่จะไม่มีการแจ้งเตือนทันที)
+ *   ADMIN_LINE_USER_ID          -> LINE user ID ของคนแรกที่จะเป็นแอดมินได้ (ใช้ตอนเริ่มระบบครั้งแรกเท่านั้น
+ *     เพื่อปลดล็อกหน้า "สิทธิ์ผู้ใช้" ในตั้งค่า — หลังจากนั้น Admin คนนี้ไปตั้งสิทธิ์ admin ให้ตัวเอง/คนอื่นในชีต
+ *     LineUsers ต่อได้เลย ไม่ต้องพึ่ง Property นี้อีก ถ้าไม่ใส่ จะไม่มีใครเป็นแอดมินได้จนกว่าจะไปแก้คอลัมน์ role ในชีตตรงๆ)
  *     หา LINE user ID ของตัวเองได้จากชีต "LineUsers" หลังจากเปิด LIFF ผ่าน Line ไปแล้วอย่างน้อย 1 ครั้ง
  *
  * แล้วรันฟังก์ชัน setupSheets() หนึ่งครั้งจากใน Apps Script editor เพื่อสร้างชีตและหัวคอลัมน์ให้ครบ
@@ -16,6 +18,7 @@
 
 const STAGE_NAMES = ["ขยาย", "กระตุ้นราก", "พร้อมออกปลูก"];
 const MEDIA_TYPES = ["TIB", "SS"];
+const LABS = ["KA", "NJ", "CC"];
 
 // ===================================================================
 // เข้าถึง Spreadsheet
@@ -36,11 +39,11 @@ const SHEET_SCHEMAS = {
   ],
   Storage: ["type", "value", "active"],
   Transfers: [
-    "record_id", "plant_id", "plant_name", "lot_no", "round_no", "transfer_date", "quantity",
+    "record_id", "plant_id", "plant_name", "lot_no", "lab", "round_no", "transfer_date", "quantity",
     "media_type", "bottle_no", "shelf", "sub_shelf",
     "stage", "recipe_used", "next_transfer_date", "recorded_by", "created_at",
   ],
-  LineUsers: ["line_user_id", "display_name", "active"],
+  LineUsers: ["line_user_id", "display_name", "role", "lab", "active"],
 };
 
 /** รันครั้งเดียวตอนติดตั้งระบบครั้งแรก: สร้างชีต + หัวคอลัมน์ (ไม่ลบของเดิมถ้ามีอยู่แล้ว) */
@@ -142,6 +145,43 @@ function formatThaiDate(date) {
 }
 
 // ===================================================================
+// สิทธิ์ผู้ใช้ — อ่านบทบาท (admin/user) + ห้อง Lab ของผู้เรียก API จาก line_user_id
+// ที่ liff-app/js/api.js แนบมาให้อัตโนมัติทุก request
+// ===================================================================
+
+/** หาแถวผู้ใช้จาก line_user_id เพียวๆ ไม่ throw ถ้าไม่พบ (คืน null) */
+function findLineUser(line_user_id) {
+  if (!line_user_id) return null;
+  const users = getSheetData("LineUsers");
+  return users.find(u => u.line_user_id === line_user_id) || null;
+}
+
+/**
+ * ดึงข้อมูลผู้เรียก API จาก payload.line_user_id
+ * isAdmin = true ถ้า role ในชีตเป็น "admin" หรือถ้าเป็นคนที่ตรงกับ ADMIN_LINE_USER_ID
+ * (ใช้ปลดล็อกแอดมินคนแรกตอนยังไม่มีใคร role admin ในชีตเลย)
+ */
+function getCurrentUser(payload) {
+  const line_user_id = payload.line_user_id || "";
+  const row = findLineUser(line_user_id);
+  const bootstrapAdminId = PropertiesService.getScriptProperties().getProperty("ADMIN_LINE_USER_ID");
+  const isAdmin = (row && row.role === "admin") || (!!bootstrapAdminId && line_user_id === bootstrapAdminId);
+  return {
+    line_user_id,
+    display_name: row ? row.display_name : "",
+    lab: row ? row.lab : "",
+    isAdmin,
+  };
+}
+
+/** ใช้ใน handler ที่ต้องเป็นแอดมินเท่านั้น (เช่น จัดการสิทธิ์ผู้ใช้) */
+function requireAdmin(payload) {
+  const me = getCurrentUser(payload);
+  if (!me.isAdmin) throw new Error("ต้องเป็นแอดมินเท่านั้นถึงทำรายการนี้ได้");
+  return me;
+}
+
+// ===================================================================
 // API ROUTER — เรียกจาก liff-app/js/api.js ด้วย { action, payload }
 // ===================================================================
 function doPost(e) {
@@ -152,6 +192,9 @@ function doPost(e) {
     const payload = body.payload || {};
     const handlers = {
       registerLineUser,
+      setMyLab,
+      listUsers,
+      setUserPermissions,
       listPlantsWithCount,
       listPlantsFull,
       savePlantType,
@@ -160,7 +203,6 @@ function doPost(e) {
       addStorageValue,
       deactivateStorageValue,
       recordTransfer,
-      listLineUsers,
       getDashboard,
       listActiveLots,
       getLotHistory,
@@ -183,16 +225,50 @@ function registerLineUser(payload) {
   const existing = users.find(u => u.line_user_id === payload.line_user_id);
   if (existing) {
     if (!existing.active || existing.display_name !== payload.display_name) {
-      updateRow("LineUsers", existing._row, { line_user_id: payload.line_user_id, display_name: payload.display_name, active: true });
+      updateRow("LineUsers", existing._row, { ...existing, display_name: payload.display_name, active: true });
     }
-    return { updated: true };
+    return { updated: true, role: existing.role || "user", lab: existing.lab || "" };
   }
-  appendRow("LineUsers", { line_user_id: payload.line_user_id, display_name: payload.display_name, active: true });
-  return { created: true };
+  appendRow("LineUsers", { line_user_id: payload.line_user_id, display_name: payload.display_name, role: "user", lab: "", active: true });
+  return { created: true, role: "user", lab: "" };
 }
 
-function listLineUsers() {
-  return getSheetData("LineUsers").map(u => ({ line_user_id: u.line_user_id, display_name: u.display_name, active: u.active }));
+/** ผู้ใช้เลือก Lab ของตัวเองครั้งแรกที่เปิดแอป (ตั้งได้ครั้งเดียว — ถ้าจะเปลี่ยนทีหลังต้องให้แอดมินตั้งให้ผ่านหน้า "สิทธิ์ผู้ใช้") */
+function setMyLab(payload) {
+  if (LABS.indexOf(payload.lab) === -1) throw new Error("กรุณาเลือก Lab ให้ถูกต้อง");
+  const existing = findLineUser(payload.line_user_id);
+  if (!existing) throw new Error("ไม่พบผู้ใช้นี้ กรุณาเปิดแอปผ่าน Line ใหม่อีกครั้ง");
+  if (existing.lab) return { lab: existing.lab }; // ตั้งไปแล้ว ไม่ให้ตั้งซ้ำ (ให้แอดมินเปลี่ยนแทน)
+  updateRow("LineUsers", existing._row, { ...existing, lab: payload.lab });
+  return { lab: payload.lab };
+}
+
+/** รายชื่อผู้ใช้ทั้งหมด + บทบาท/Lab — สำหรับหน้า "สิทธิ์ผู้ใช้" (แอดมินเท่านั้น) */
+function listUsers(payload) {
+  requireAdmin(payload);
+  return getSheetData("LineUsers").map(u => ({
+    line_user_id: u.line_user_id,
+    display_name: u.display_name,
+    role: u.role || "user",
+    lab: u.lab || "",
+    active: u.active,
+  }));
+}
+
+/** แอดมินเปลี่ยนบทบาท/Lab ของผู้ใช้คนใดก็ได้ */
+function setUserPermissions(payload) {
+  requireAdmin(payload);
+  if (!payload.target_line_user_id) throw new Error("ไม่พบผู้ใช้ที่จะแก้ไข");
+  if (payload.role && ["admin", "user"].indexOf(payload.role) === -1) throw new Error("บทบาทต้องเป็น admin หรือ user");
+  if (payload.lab && LABS.indexOf(payload.lab) === -1) throw new Error("Lab ไม่ถูกต้อง");
+  const existing = findLineUser(payload.target_line_user_id);
+  if (!existing) throw new Error("ไม่พบผู้ใช้นี้");
+  updateRow("LineUsers", existing._row, {
+    ...existing,
+    role: payload.role !== undefined ? payload.role : existing.role,
+    lab: payload.lab !== undefined ? payload.lab : existing.lab,
+  });
+  return { updated: true };
 }
 
 // ===================================================================
@@ -202,13 +278,14 @@ function listPlantsFull() {
   return getSheetData("PlantTypes");
 }
 
-function listPlantsWithCount() {
+function listPlantsWithCount(payload) {
+  const me = getCurrentUser(payload);
   const plants = getSheetData("PlantTypes").filter(p => p.active !== false);
-  const transfers = getSheetData("Transfers");
+  const transfers = getSheetData("Transfers").filter(t => t.lab && (me.isAdmin || t.lab === me.lab));
   return plants.map(p => {
     const latestByLot = {};
-    transfers.filter(t => t.plant_id === p.plant_id && t.lot_no).forEach(t => {
-      const key = t.lot_no;
+    transfers.filter(t => t.plant_id === p.plant_id).forEach(t => {
+      const key = t.lab + "|" + t.lot_no;
       if (!latestByLot[key] || new Date(t.transfer_date) > new Date(latestByLot[key].transfer_date)) {
         latestByLot[key] = t;
       }
@@ -300,16 +377,20 @@ function recordTransfer(payload) {
     throw new Error("กรุณาใส่หมายเลขขวด (จำเป็นสำหรับ TIB)");
   }
 
+  const me = getCurrentUser(payload);
+  if (!me.lab) throw new Error("ยังไม่ได้ระบุ Lab ของคุณ กรุณาเปิดแอปใหม่อีกครั้ง");
+
   const plants = getSheetData("PlantTypes");
   const plant = plants.find(p => p.plant_id === payload.plant_id);
   if (!plant) throw new Error("ไม่พบชนิดพืชนี้");
 
-  // ระบุรอบที่ด้วย (plant_id, lot_no) ไม่ใช้ตำแหน่งเก็บ (shelf/sub_shelf) อีกต่อไป
+  // ระบุรอบที่ด้วย (plant_id, lot_no, lab) ไม่ใช้ตำแหน่งเก็บ (shelf/sub_shelf) อีกต่อไป
   // เพราะล็อตเดียวกันอาจย้ายตำแหน่งเก็บได้ระหว่างรอบ — ตำแหน่งเป็นแค่ metadata ของรอบนั้นๆ
+  // ผูกกับ lab ด้วยเพื่อไม่ให้ Lab อื่นที่ใช้หมายเลขล็อตเดียวกันโดยบังเอิญมาปนกัน
   // ถ้า lot_no นี้เคยจบไปแล้ว (แถวล่าสุดไม่มี next_transfer_date) จะถือเป็นล็อตใหม่ เริ่มรอบที่ 1 ใหม่
   const transfers = getSheetData("Transfers");
   const sameLot = transfers.filter(t =>
-    t.plant_id === payload.plant_id && String(t.lot_no) === String(payload.lot_no)
+    t.plant_id === payload.plant_id && String(t.lot_no) === String(payload.lot_no) && t.lab === me.lab
   );
   let previous = null;
   sameLot.forEach(t => {
@@ -348,6 +429,7 @@ function recordTransfer(payload) {
     plant_id: plant.plant_id,
     plant_name: plant.plant_name,
     lot_no: payload.lot_no,
+    lab: me.lab,
     round_no,
     transfer_date: formatThaiDate(today),
     quantity: payload.quantity,
@@ -363,7 +445,7 @@ function recordTransfer(payload) {
   };
   appendRow("Transfers", record);
 
-  notifyAdminNewRecord(record, round_in_stage);
+  notifyAfterRecord(record, round_in_stage, me.line_user_id);
 
   return {
     lot_no: record.lot_no,
@@ -376,36 +458,48 @@ function recordTransfer(payload) {
   };
 }
 
-function notifyAdminNewRecord(record, round_in_stage) {
+/**
+ * แจ้งเตือนทันทีหลังบันทึกสำเร็จ: ส่งให้ (1) ผู้บันทึกเอง (ยืนยันว่าบันทึกของตัวเองสำเร็จ)
+ * และ (2) แอดมินทุกคน (เห็นทุก Lab) — ไม่ส่งให้คนอื่นใน Lab เดียวกันที่ไม่ได้เป็นคนบันทึก
+ */
+function notifyAfterRecord(record, round_in_stage, recorderLineUserId) {
   try {
-    const adminId = PropertiesService.getScriptProperties().getProperty("ADMIN_LINE_USER_ID");
-    if (!adminId) return;
+    const users = getSheetData("LineUsers").filter(u => u.active !== false);
+    const adminIds = users.filter(u => u.role === "admin").map(u => u.line_user_id);
+    const bootstrapAdminId = PropertiesService.getScriptProperties().getProperty("ADMIN_LINE_USER_ID");
+    const recipients = new Set(adminIds);
+    if (bootstrapAdminId) recipients.add(bootstrapAdminId);
+    if (recorderLineUserId) recipients.add(recorderLineUserId);
+    if (recipients.size === 0) return;
+
     const lines = [
       "📝 มีการบันทึกถ่ายโอนเนื้อเยื่อใหม่",
-      `${record.plant_name} — ล็อต ${record.lot_no} — ${record.stage} (รอบที่ ${round_in_stage})`,
+      `Lab ${record.lab} — ${record.plant_name} — ล็อต ${record.lot_no} — ${record.stage} (รอบที่ ${round_in_stage})`,
       `ประเภท: ${record.media_type}${record.bottle_no ? " · ขวดเลขที่ " + record.bottle_no : ""}`,
       `ที่เก็บ: ชั้น ${record.shelf}/${record.sub_shelf} · จำนวน ${record.quantity} ต้น`,
       `บันทึกโดย: ${record.recorded_by}`,
     ];
-    pushLineMessage([adminId], lines.join("\n"));
+    pushLineMessage([...recipients], lines.join("\n"));
   } catch (err) {
-    Logger.log("แจ้งเตือนแอดมินไม่สำเร็จ: " + err.message);
+    Logger.log("แจ้งเตือนหลังบันทึกไม่สำเร็จ: " + err.message);
   }
 }
 
 // ===================================================================
 // Handler: Dashboard
 // ===================================================================
-function getDashboard() {
-  const transfers = getSheetData("Transfers");
-  const plants = getSheetData("PlantTypes");
-  const storage = getSheetData("Storage").filter(s => s.active !== false);
 
-  // นับ "ล็อต" ที่กำลังติดตามอยู่ ไม่ใช่ตำแหน่งเก็บ — แถวเก่าที่ไม่มี lot_no (ก่อนอัปเดตฟีเจอร์นี้) ถูกข้าม
+/**
+ * คำนวณข้อมูล Dashboard จากรายการ transfers ที่กรองมาแล้ว (กรองตาม Lab ไว้ก่อนเรียกฟังก์ชันนี้)
+ * แยกออกมาเป็นฟังก์ชันกลาง เพื่อให้ getDashboard() (ต่อ Lab ของผู้ใช้) และ sendDueReminders()
+ * (ต้องคำนวณทีละ Lab + รวมทุก Lab สำหรับแอดมิน) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
+ */
+function computeDashboardData(transfers, plants, storage) {
+  // นับ "ล็อต" ที่กำลังติดตามอยู่ ไม่ใช่ตำแหน่งเก็บ — แถวเก่าที่ไม่มี lot_no/lab (ก่อนอัปเดตฟีเจอร์นี้) ถูกข้าม
   const latestByLot = {};
   transfers.forEach(t => {
     if (!t.lot_no) return;
-    const key = t.plant_id + "|" + t.lot_no;
+    const key = t.plant_id + "|" + t.lab + "|" + t.lot_no;
     if (!latestByLot[key] || new Date(t.transfer_date) > new Date(latestByLot[key].transfer_date)) {
       latestByLot[key] = t;
     }
@@ -431,6 +525,7 @@ function getDashboard() {
     return {
       plant_name: t.plant_name,
       lot_no: t.lot_no,
+      lab: t.lab,
       shelf: t.shelf,
       sub_shelf: t.sub_shelf,
       media_type: t.media_type,
@@ -463,18 +558,30 @@ function getDashboard() {
   return { total_lots, total_plants, due_soon, by_plant, storage_overview };
 }
 
+/** Dashboard ของผู้เรียก — User เห็นแค่ Lab ตัวเอง, Admin เห็นรวมทุก Lab */
+function getDashboard(payload) {
+  const me = getCurrentUser(payload);
+  const transfers = getSheetData("Transfers").filter(t => t.lab && (me.isAdmin || t.lab === me.lab));
+  const plants = getSheetData("PlantTypes");
+  const storage = getSheetData("Storage").filter(s => s.active !== false);
+  const data = computeDashboardData(transfers, plants, storage);
+  return { ...data, lab: me.isAdmin ? null : me.lab };
+}
+
 // ===================================================================
 // Handlers: ประวัติย้อนหลังของล็อต (track ว่าทำ subculture มากี่รอบแล้ว)
 // ===================================================================
 
-/** รายการล็อตที่ "กำลังติดตามอยู่" ของชนิดพืชหนึ่ง (ยังไม่ถึงระยะพร้อมออกปลูก) */
+/** รายการล็อตที่ "กำลังติดตามอยู่" ของชนิดพืชหนึ่ง (ยังไม่ถึงระยะพร้อมออกปลูก) — เห็นเฉพาะ Lab ตัวเอง ยกเว้นแอดมินเห็นทุก Lab */
 function listActiveLots(payload) {
   if (!payload.plant_id) throw new Error("กรุณาระบุชนิดพืช");
-  const transfers = getSheetData("Transfers").filter(t => t.plant_id === payload.plant_id);
+  const me = getCurrentUser(payload);
+  const transfers = getSheetData("Transfers").filter(t =>
+    t.plant_id === payload.plant_id && t.lab && (me.isAdmin || t.lab === me.lab)
+  );
   const latestByLot = {};
   transfers.forEach(t => {
-    if (!t.lot_no) return; // ข้ามแถวเก่าที่ไม่มี lot_no (ข้อมูลก่อนอัปเดตฟีเจอร์นี้)
-    const key = t.lot_no;
+    const key = t.lab + "|" + t.lot_no;
     if (!latestByLot[key] || new Date(t.transfer_date) > new Date(latestByLot[key].transfer_date)) {
       latestByLot[key] = t;
     }
@@ -483,6 +590,7 @@ function listActiveLots(payload) {
     .filter(t => !!t.next_transfer_date)
     .map(t => ({
       lot_no: t.lot_no,
+      lab: t.lab,
       shelf: t.shelf,
       sub_shelf: t.sub_shelf,
       round_no: t.round_no,
@@ -496,12 +604,14 @@ function listActiveLots(payload) {
 
 /**
  * ประวัติทุกรอบของล็อตเดียว (ไล่ย้อนจากรอบปัจจุบันกลับไปรอบที่ 1)
- * อิงรอบที่ตาม (plant_id, lot_no) ไม่ใช่ตำแหน่งเก็บ — เพราะล็อตอาจย้ายชั้น/ช่องระหว่างรอบได้
+ * อิงรอบที่ตาม (plant_id, lot_no, lab) ไม่ใช่ตำแหน่งเก็บ — เพราะล็อตอาจย้ายชั้น/ช่องระหว่างรอบได้
+ * ดูได้แค่ล็อตของ Lab ตัวเอง ยกเว้นแอดมินดูได้ทุก Lab
  */
 function getLotHistory(payload) {
   if (!payload.plant_id || !payload.lot_no) throw new Error("ข้อมูลไม่ครบ");
+  const me = getCurrentUser(payload);
   const transfers = getSheetData("Transfers").filter(t =>
-    t.plant_id === payload.plant_id && String(t.lot_no) === String(payload.lot_no)
+    t.plant_id === payload.plant_id && String(t.lot_no) === String(payload.lot_no) && t.lab && (me.isAdmin || t.lab === me.lab)
   );
   let current = null;
   transfers.forEach(t => {
@@ -562,24 +672,50 @@ function parseThaiDateApprox(thaiDateStr) {
 // ===================================================================
 // แจ้งเตือน Line รายวัน — ตั้ง Time-driven trigger ให้รันฟังก์ชันนี้ทุกเช้า (เช่น 7:00)
 // ===================================================================
+/**
+ * ผู้ใช้แต่ละคนได้รับแจ้งเตือนรายวันแยกตาม Lab ของตัวเอง — เห็นเฉพาะของ Lab ตัวเอง
+ * แอดมินได้รับสรุปรวมทุก Lab เป็นข้อความเดียว (ไม่ได้รับซ้ำกับสรุปของ Lab ตัวเองอีกรอบ)
+ */
 function sendDueReminders() {
-  const dashboard = getDashboard();
+  const allTransfers = getSheetData("Transfers");
+  const plants = getSheetData("PlantTypes");
+  const storage = getSheetData("Storage").filter(s => s.active !== false);
+  const users = getSheetData("LineUsers").filter(u => u.active !== false);
   const now = new Date();
   const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
-  const dueTodayTomorrow = dashboard.due_soon.filter(d => {
-    const due = parseThaiDateApprox(d.next_transfer_date);
-    return isSameDay(due, now) || isSameDay(due, tomorrow);
+
+  function dueTodayTomorrowOf(transfersForScope) {
+    const data = computeDashboardData(transfersForScope, plants, storage);
+    return data.due_soon.filter(d => {
+      const due = parseThaiDateApprox(d.next_transfer_date);
+      return isSameDay(due, now) || isSameDay(due, tomorrow);
+    });
+  }
+
+  // ส่งให้สมาชิกแต่ละ Lab (ที่ไม่ใช่แอดมิน) เห็นแค่ของ Lab ตัวเอง
+  LABS.forEach(lab => {
+    const due = dueTodayTomorrowOf(allTransfers.filter(t => t.lab === lab));
+    if (due.length === 0) return;
+    const lines = due.map(d =>
+      `• ${d.plant_name} — ล็อต ${d.lot_no} — ชั้น ${d.shelf}/${d.sub_shelf}\n  สูตรรอบหน้า: ${d.next_recipe || "-"}`
+    );
+    const message = `🌱 แจ้งเตือนถ่ายโอนเนื้อเยื่อ — Lab ${lab}\nวันนี้/พรุ่งนี้ถึงกำหนด ${due.length} ล็อต:\n\n${lines.join("\n\n")}`;
+    const recipients = users.filter(u => u.role !== "admin" && u.lab === lab).map(u => u.line_user_id);
+    if (recipients.length > 0) pushLineMessage(recipients, message);
   });
-  if (dueTodayTomorrow.length === 0) return;
 
-  const lines = dueTodayTomorrow.map(d =>
-    `• ${d.plant_name} — ล็อต ${d.lot_no} — ชั้น ${d.shelf}/${d.sub_shelf}\n  สูตรรอบหน้า: ${d.next_recipe || "-"}`
-  );
-  const message = `🌱 แจ้งเตือนถ่ายโอนเนื้อเยื่อ\nวันนี้/พรุ่งนี้ถึงกำหนด ${dueTodayTomorrow.length} ล็อต:\n\n${lines.join("\n\n")}`;
-
-  const users = getSheetData("LineUsers").filter(u => u.active !== false).map(u => u.line_user_id);
-  if (users.length === 0) return;
-  pushLineMessage(users, message);
+  // แอดมิน: สรุปรวมทุก Lab ในข้อความเดียว
+  const dueAll = dueTodayTomorrowOf(allTransfers.filter(t => !!t.lab));
+  if (dueAll.length > 0) {
+    const adminIds = users.filter(u => u.role === "admin").map(u => u.line_user_id);
+    if (adminIds.length > 0) {
+      const lines = dueAll.map(d =>
+        `• Lab ${d.lab} — ${d.plant_name} — ล็อต ${d.lot_no} — ชั้น ${d.shelf}/${d.sub_shelf}\n  สูตรรอบหน้า: ${d.next_recipe || "-"}`
+      );
+      const message = `🌱 แจ้งเตือนถ่ายโอนเนื้อเยื่อ — ทุก Lab\nวันนี้/พรุ่งนี้ถึงกำหนด ${dueAll.length} ล็อต:\n\n${lines.join("\n\n")}`;
+      pushLineMessage(adminIds, message);
+    }
+  }
 }
 
 function isSameDay(a, b) {

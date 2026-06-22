@@ -14,6 +14,7 @@
   <div class="topbar">
     <a href="../liff-app/index.html" class="back-btn">‹</a>
     <h1>สรุปข้อมูล</h1>
+    <span class="lab-badge hidden" id="lab-badge"></span>
   </div>
 
   <div class="stat-row" id="stat-row">
@@ -64,6 +65,10 @@ async function loadDashboard() {
   try {
     const data = await TissueApp.call("getDashboard");
 
+    const badge = document.getElementById("lab-badge");
+    badge.textContent = data.lab ? "Lab " + data.lab : "ทุก Lab";
+    badge.classList.remove("hidden");
+
     // แถบสรุป
     const statRow = document.getElementById("stat-row");
     statRow.innerHTML = `
@@ -80,7 +85,7 @@ async function loadDashboard() {
       dueList.innerHTML = data.due_soon.map(d => `
         <div class="due-item">
           <div>
-            <div class="name">${d.plant_name} <span class="muted">(${d.stage} ${d.round_in_stage})</span></div>
+            <div class="name">${data.lab ? "" : "Lab " + d.lab + " · "}${d.plant_name} <span class="muted">(${d.stage} ${d.round_in_stage})</span></div>
             <div class="loc">ล็อต ${d.lot_no} · ชั้น ${d.shelf}/${d.sub_shelf} · ${d.media_type}${d.bottle_no ? " #" + d.bottle_no : ""} · สูตรรอบหน้า: ${d.next_recipe || "-"}</div>
           </div>
           <div class="date">${d.next_transfer_date}</div>

@@ -15,6 +15,7 @@
   <div class="topbar">
     <a href="index.html" class="back-btn">‹</a>
     <h1 id="plant-title">บันทึกการถ่ายโอน</h1>
+    <span class="lab-badge hidden" id="lab-badge"></span>
   </div>
 
   <!-- แสดงผลหลังบันทึกสำเร็จ -->
@@ -287,6 +288,9 @@ document.getElementById("record-next-btn").addEventListener("click", () => {
 
 (async () => {
   await TissueApp.init();
+  const badge = document.getElementById("lab-badge");
+  badge.textContent = TissueApp.isAdmin() ? "ทุก Lab" : "Lab " + TissueApp.myLab;
+  badge.classList.remove("hidden");
   await Promise.all([loadPlants(), loadStorage()]);
 })();
 </script>

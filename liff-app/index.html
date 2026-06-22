@@ -14,6 +14,7 @@
 
   <div class="topbar">
     <h1>เลือกชนิดพืช</h1>
+    <span class="lab-badge hidden" id="lab-badge"></span>
   </div>
   <p class="muted">แตะชนิดพืชที่จะบันทึกการถ่ายโอนเนื้อเยื่อรอบนี้</p>
 
@@ -63,8 +64,15 @@ async function loadPlants() {
   }
 }
 
+function showLabBadge() {
+  const badge = document.getElementById("lab-badge");
+  badge.textContent = TissueApp.isAdmin() ? "ทุก Lab" : "Lab " + TissueApp.myLab;
+  badge.classList.remove("hidden");
+}
+
 (async () => {
   await TissueApp.init();
+  showLabBadge();
   loadPlants();
 })();
 </script>
