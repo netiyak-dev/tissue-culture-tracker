@@ -162,6 +162,8 @@ function doPost(e) {
       recordTransfer,
       listLineUsers,
       getDashboard,
+      listActiveBottles,
+      getBottleHistory,
     };
     if (!handlers[action]) throw new Error("ไม่รู้จัก action: " + action);
     const result = handlers[action](payload);
@@ -451,6 +453,77 @@ function getDashboard() {
   });
 
   return { total_bottles, total_plants, due_soon, by_plant, storage_overview };
+}
+
+// ===================================================================
+// Handlers: ประวัติย้อนหลังของขวด (track ว่าทำ subculture มากี่รอบแล้ว)
+// ===================================================================
+
+/** รายการขวดที่ "กำลังติดตามอยู่" ของชนิดพืชหนึ่ง (ยังไม่ถึงระยะพร้อมออกปลูก) */
+function listActiveBottles(payload) {
+  if (!payload.plant_id) throw new Error("กรุณาระบุชนิดพืช");
+  const transfers = getSheetData("Transfers").filter(t => t.plant_id === payload.plant_id);
+  const latestByPosition = {};
+  transfers.forEach(t => {
+    const key = t.shelf + "|" + t.sub_shelf;
+    if (!latestByPosition[key] || new Date(t.transfer_date) > new Date(latestByPosition[key].transfer_date)) {
+      latestByPosition[key] = t;
+    }
+  });
+  return Object.values(latestByPosition)
+    .filter(t => !!t.next_transfer_date)
+    .map(t => ({
+      shelf: t.shelf,
+      sub_shelf: t.sub_shelf,
+      round_no: t.round_no,
+      stage: t.stage,
+      media_type: t.media_type,
+      bottle_no: t.bottle_no,
+      next_transfer_date: t.next_transfer_date,
+    }))
+    .sort((a, b) => String(a.shelf) + String(a.sub_shelf) > String(b.shelf) + String(b.sub_shelf) ? 1 : -1);
+}
+
+/**
+ * ประวัติทุกรอบของขวดเดียว (ไล่ย้อนจากรอบปัจจุบันกลับไปรอบที่ 1)
+ * เดินตามตรรกะเดียวกับ recordTransfer (อิงตำแหน่ง + รอบที่ติดกัน) เพื่อไม่ปนกับ
+ * ขวดเก่าที่เคยอยู่ตำแหน่งเดียวกันแล้วจบไปก่อนหน้า (กรณีใช้ตำแหน่งซ้ำ)
+ */
+function getBottleHistory(payload) {
+  if (!payload.plant_id || !payload.shelf || !payload.sub_shelf) throw new Error("ข้อมูลไม่ครบ");
+  const transfers = getSheetData("Transfers").filter(t =>
+    t.plant_id === payload.plant_id && String(t.shelf) === String(payload.shelf) && String(t.sub_shelf) === String(payload.sub_shelf)
+  );
+  let current = null;
+  transfers.forEach(t => {
+    if (!current || new Date(t.transfer_date) > new Date(current.transfer_date)) current = t;
+  });
+  if (!current) return [];
+
+  const chain = [current];
+  let cursor = current;
+  while (Number(cursor.round_no) > 1) {
+    const targetRound = Number(cursor.round_no) - 1;
+    const prevCandidates = transfers.filter(t =>
+      Number(t.round_no) === targetRound && new Date(t.transfer_date) <= new Date(cursor.transfer_date)
+    );
+    if (prevCandidates.length === 0) break;
+    prevCandidates.sort((a, b) => new Date(b.transfer_date) - new Date(a.transfer_date));
+    cursor = prevCandidates[0];
+    chain.push(cursor);
+  }
+  chain.reverse();
+  return chain.map(t => ({
+    round_no: t.round_no,
+    transfer_date: t.transfer_date,
+    stage: t.stage,
+    media_type: t.media_type,
+    bottle_no: t.bottle_no,
+    quantity: t.quantity,
+    recipe_used: t.recipe_used,
+    next_transfer_date: t.next_transfer_date,
+    recorded_by: t.recorded_by,
+  }));
 }
 
 function nextRecipeFor(plants, transferRow) {

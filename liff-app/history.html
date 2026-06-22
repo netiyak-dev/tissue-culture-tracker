@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>ประวัติการถ่ายโอน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/style.css" />
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+<div class="screen">
+
+  <div class="topbar">
+    <a href="#" id="back-btn" class="back-btn">‹</a>
+    <h1 id="page-title">ประวัติการถ่ายโอน</h1>
+  </div>
+
+  <!-- ขั้นที่ 1: เลือกชนิดพืช -->
+  <div id="view-plants">
+    <p class="muted">เลือกชนิดพืชที่จะดูประวัติ</p>
+    <div id="plant-list"></div>
+  </div>
+
+  <!-- ขั้นที่ 2: เลือกขวด -->
+  <div id="view-bottles" class="hidden">
+    <p class="muted">เลือกขวดที่จะดูประวัติ (แสดงเฉพาะขวดที่ยังติดตามอยู่)</p>
+    <div id="bottle-list"></div>
+  </div>
+
+  <!-- ขั้นที่ 3: ไทม์ไลน์ -->
+  <div id="view-timeline" class="hidden">
+    <div class="card" id="timeline-summary" style="margin-bottom:16px;"></div>
+    <div class="card">
+      <div id="timeline-list"></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/api.js"></script>
+<script>
+let plantsCache = [];
+let currentPlantId = null;
+
+function show(view) {
+  ["view-plants", "view-bottles", "view-timeline"].forEach(id => {
+    document.getElementById(id).classList.toggle("hidden", id !== view);
+  });
+}
+
+function setBack(view, title) {
+  document.getElementById("page-title").textContent = title;
+  const backBtn = document.getElementById("back-btn");
+  backBtn.onclick = (e) => {
+    e.preventDefault();
+    if (view === "plants") { window.location.href = "index.html"; return; }
+    if (view === "bottles") { loadPlantList(); return; }
+  };
+}
+
+// ---------- ขั้นที่ 1 ----------
+async function loadPlantList() {
+  show("view-plants");
+  setBack("plants", "ประวัติการถ่ายโอน");
+  const list = document.getElementById("plant-list");
+  list.innerHTML = '<p class="muted">กำลังโหลด...</p>';
+  plantsCache = await TissueApp.call("listPlantsWithCount");
+  list.innerHTML = "";
+  if (plantsCache.length === 0) {
+    list.innerHTML = '<p class="muted">ยังไม่มีชนิดพืชในระบบ</p>';
+    return;
+  }
+  plantsCache.forEach(p => {
+    const card = document.createElement("div");
+    card.className = "card card-tap";
+    card.innerHTML = `
+      <div>
+        <div class="plant-name">${p.plant_name}</div>
+        <div class="plant-count">ขวดที่ติดตามอยู่: ${p.active_count} ขวด</div>
+      </div>
+      <div class="chevron">›</div>
+    `;
+    card.addEventListener("click", () => loadBottleList(p.plant_id, p.plant_name));
+    list.appendChild(card);
+  });
+}
+
+// ---------- ขั้นที่ 2 ----------
+async function loadBottleList(plant_id, plant_name) {
+  currentPlantId = plant_id;
+  show("view-bottles");
+  setBack("bottles", plant_name);
+  const list = document.getElementById("bottle-list");
+  list.innerHTML = '<p class="muted">กำลังโหลด...</p>';
+  const bottles = await TissueApp.call("listActiveBottles", { plant_id });
+  list.innerHTML = "";
+  if (bottles.length === 0) {
+    list.innerHTML = '<p class="muted">ชนิดนี้ยังไม่มีขวดที่กำลังติดตามอยู่</p>';
+    return;
+  }
+  bottles.forEach(b => {
+    const card = document.createElement("div");
+    card.className = "card card-tap";
+    card.innerHTML = `
+      <div>
+        <div class="plant-name">ชั้น ${b.shelf}/${b.sub_shelf}</div>
+        <div class="plant-count">${b.stage} · รอบที่ ${b.round_no} · ${b.media_type}${b.bottle_no ? " #" + b.bottle_no : ""}</div>
+      </div>
+      <div class="chevron">›</div>
+    `;
+    card.addEventListener("click", () => loadTimeline(plant_id, plant_name, b.shelf, b.sub_shelf));
+    list.appendChild(card);
+  });
+}
+
+// ---------- ขั้นที่ 3 ----------
+async function loadTimeline(plant_id, plant_name, shelf, sub_shelf) {
+  show("view-timeline");
+  setBack("bottles", `${plant_name} — ชั้น ${shelf}/${sub_shelf}`);
+  document.getElementById("back-btn").onclick = (e) => { e.preventDefault(); loadBottleList(plant_id, plant_name); };
+
+  const summary = document.getElementById("timeline-summary");
+  const list = document.getElementById("timeline-list");
+  summary.innerHTML = '<p class="muted">กำลังโหลด...</p>';
+  list.innerHTML = "";
+
+  const history = await TissueApp.call("getBottleHistory", { plant_id, shelf, sub_shelf });
+  if (history.length === 0) {
+    summary.innerHTML = '<p class="muted">ไม่พบประวัติของขวดนี้</p>';
+    return;
+  }
+  const latest = history[history.length - 1];
+  summary.innerHTML = `
+    <div class="plant-name">ทำ Subculture มาแล้วทั้งหมด ${history.length} รอบ</div>
+    <div class="muted">ปัจจุบันอยู่ระยะ: ${latest.stage} · บันทึกล่าสุด ${latest.transfer_date}</div>
+  `;
+
+  list.innerHTML = history.map(h => `
+    <div class="history-row">
+      <div class="round-badge">${h.round_no}</div>
+      <div class="content">
+        <div class="top-line">
+          <span>${h.stage}</span>
+          <span class="media-tag">${h.media_type}${h.bottle_no ? " #" + h.bottle_no : ""}</span>
+        </div>
+        <div class="muted">${h.transfer_date} · ${h.quantity} ต้น · สูตร: ${h.recipe_used || "-"}</div>
+        <div class="muted">บันทึกโดย: ${h.recorded_by}</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+(async () => {
+  await TissueApp.init();
+  const qPlant = TissueApp.getParam("plant_id");
+  const qShelf = TissueApp.getParam("shelf");
+  const qSub = TissueApp.getParam("sub_shelf");
+  if (qPlant && qShelf && qSub) {
+    plantsCache = await TissueApp.call("listPlantsWithCount");
+    const plant = plantsCache.find(p => p.plant_id === qPlant);
+    await loadTimeline(qPlant, plant ? plant.plant_name : "", qShelf, qSub);
+    return;
+  }
+  await loadPlantList();
+})();
+</script>
+</body>
+</html>

@@ -346,6 +346,40 @@ p { line-height: 1.6; margin: 0 0 var(--space-3) 0; }
 .storage-cell .loc { font-size: 11px; color: var(--text-muted); }
 .storage-cell.empty { background: var(--surface); border: 1px dashed var(--border); }
 
+/* หน้าประวัติ */
+.round-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--mint);
+  color: var(--forest);
+  font-weight: 700;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.history-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.history-row:last-child { border-bottom: none; }
+.history-row .content { flex: 1; }
+.history-row .top-line { font-weight: 600; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.history-row .media-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--leaf-light);
+  color: #fff;
+}
+
 /* ---------- ยูทิลิตี้ ---------- */
 .hidden { display: none !important; }
 .empty-state {
