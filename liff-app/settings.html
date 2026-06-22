@@ -42,6 +42,10 @@
   <div class="tab-panel" id="panel-notify">
     <p class="muted">รายชื่อคนที่เปิดแอปนี้ผ่าน Line แล้ว จะได้รับการแจ้งเตือนอัตโนมัติทุกเช้า</p>
     <div id="notify-list"></div>
+    <div class="card" style="margin-top:8px;">
+      <h3>ตั้งแอดมิน (PI) รับแจ้งเตือนทันที</h3>
+      <p class="muted">แตะที่ Line ID ของตัวเองด้านบนเพื่อคัดลอก แล้วนำไปวางใน Script Properties ชื่อ <b>ADMIN_LINE_USER_ID</b> ในหน้า Apps Script (ทำครั้งเดียว ไม่ต้องทำซ้ำ)</p>
+    </div>
   </div>
 
 </div>
@@ -56,27 +60,46 @@
       <input type="text" id="f-plant-name" placeholder="เช่น กล้วยไม้ A" />
     </div>
 
+    <h3 style="margin-top:20px;">ระยะขยาย (วนได้หลายรอบ)</h3>
     <div class="field">
-      <label>ระยะขยาย — จำนวนวันก่อนเข้าระยะถัดไป</label>
+      <label>จำนวนรอบ ก่อนเข้าระยะกระตุ้นราก</label>
+      <input type="number" id="f-stage1-rounds" placeholder="เช่น 3" min="1" />
+    </div>
+    <div class="field">
+      <label>จำนวนวันต่อรอบ</label>
       <input type="number" id="f-stage1-days" placeholder="เช่น 30" />
     </div>
     <div class="field">
-      <label>ระยะขยาย — สูตรอาหารที่ใช้</label>
-      <input type="text" id="f-stage1-recipe" placeholder="เช่น MS + BA 1mg/L" />
+      <label>สูตรอาหาร — แบบ TIB (อาหารเหลว)</label>
+      <input type="text" id="f-stage1-recipe-tib" placeholder="เช่น MS + BA 1mg/L (เหลว)" />
+    </div>
+    <div class="field">
+      <label>สูตรอาหาร — แบบ SS (กึ่งแข็ง)</label>
+      <input type="text" id="f-stage1-recipe-ss" placeholder="เช่น MS + BA 1mg/L (วุ้น)" />
     </div>
 
+    <h3 style="margin-top:20px;">ระยะกระตุ้นราก (รอบเดียวเสมอ)</h3>
     <div class="field">
-      <label>ระยะกระตุ้นราก — จำนวนวันก่อนเข้าระยะถัดไป</label>
+      <label>จำนวนวัน ก่อนเข้าระยะพร้อมออกปลูก</label>
       <input type="number" id="f-stage2-days" placeholder="เช่น 21" />
     </div>
     <div class="field">
-      <label>ระยะกระตุ้นราก — สูตรอาหารที่ใช้</label>
-      <input type="text" id="f-stage2-recipe" placeholder="เช่น MS + NAA 0.5mg/L" />
+      <label>สูตรอาหาร — แบบ TIB (อาหารเหลว)</label>
+      <input type="text" id="f-stage2-recipe-tib" placeholder="เช่น MS + NAA 0.5mg/L (เหลว)" />
+    </div>
+    <div class="field">
+      <label>สูตรอาหาร — แบบ SS (กึ่งแข็ง)</label>
+      <input type="text" id="f-stage2-recipe-ss" placeholder="เช่น MS + NAA 0.5mg/L (วุ้น)" />
     </div>
 
+    <h3 style="margin-top:20px;">ระยะพร้อมออกปลูก (ระยะสุดท้าย)</h3>
     <div class="field">
-      <label>ระยะพร้อมออกปลูก — สูตรอาหารที่ใช้ (ระยะสุดท้าย)</label>
-      <input type="text" id="f-stage3-recipe" placeholder="เช่น MS ครึ่งสูตร (ไม่ใส่ฮอร์โมน)" />
+      <label>สูตรอาหาร — แบบ TIB (อาหารเหลว)</label>
+      <input type="text" id="f-stage3-recipe-tib" placeholder="เช่น MS ครึ่งสูตร (เหลว)" />
+    </div>
+    <div class="field">
+      <label>สูตรอาหาร — แบบ SS (กึ่งแข็ง)</label>
+      <input type="text" id="f-stage3-recipe-ss" placeholder="เช่น MS ครึ่งสูตร (วุ้น)" />
     </div>
 
     <button id="save-plant-btn" class="btn btn-primary btn-block">บันทึก</button>
@@ -115,7 +138,7 @@ async function loadPlantSettings() {
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
           <div class="plant-name">${p.plant_name} ${p.active ? "" : '<span class="muted">(ปิดใช้งาน)</span>'}</div>
-          <div class="muted">ขยาย ${p.stage1_days} วัน → กระตุ้นราก ${p.stage2_days} วัน → พร้อมออกปลูก</div>
+          <div class="muted">ขยาย ${p.stage1_rounds || 1} รอบ (${p.stage1_days} วัน/รอบ) → กระตุ้นราก ${p.stage2_days} วัน → พร้อมออกปลูก</div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;">
           <button class="btn btn-ghost" style="width:auto;padding:6px 10px;" data-edit="${p.plant_id}">แก้ไข</button>
@@ -145,11 +168,15 @@ function openPlantForm(p) {
   editingPlantId = p ? p.plant_id : null;
   document.getElementById("plant-form-title").textContent = p ? "แก้ไขชนิดพืช" : "เพิ่มชนิดพืชใหม่";
   document.getElementById("f-plant-name").value = p ? p.plant_name : "";
+  document.getElementById("f-stage1-rounds").value = p ? p.stage1_rounds : "";
   document.getElementById("f-stage1-days").value = p ? p.stage1_days : "";
-  document.getElementById("f-stage1-recipe").value = p ? p.stage1_recipe : "";
+  document.getElementById("f-stage1-recipe-tib").value = p ? p.stage1_recipe_tib : "";
+  document.getElementById("f-stage1-recipe-ss").value = p ? p.stage1_recipe_ss : "";
   document.getElementById("f-stage2-days").value = p ? p.stage2_days : "";
-  document.getElementById("f-stage2-recipe").value = p ? p.stage2_recipe : "";
-  document.getElementById("f-stage3-recipe").value = p ? p.stage3_recipe : "";
+  document.getElementById("f-stage2-recipe-tib").value = p ? p.stage2_recipe_tib : "";
+  document.getElementById("f-stage2-recipe-ss").value = p ? p.stage2_recipe_ss : "";
+  document.getElementById("f-stage3-recipe-tib").value = p ? p.stage3_recipe_tib : "";
+  document.getElementById("f-stage3-recipe-ss").value = p ? p.stage3_recipe_ss : "";
   document.getElementById("plant-form-overlay").classList.remove("hidden");
 }
 
@@ -162,11 +189,15 @@ document.getElementById("save-plant-btn").addEventListener("click", async () => 
   const payload = {
     plant_id: editingPlantId,
     plant_name: document.getElementById("f-plant-name").value.trim(),
+    stage1_rounds: Number(document.getElementById("f-stage1-rounds").value),
     stage1_days: Number(document.getElementById("f-stage1-days").value),
-    stage1_recipe: document.getElementById("f-stage1-recipe").value.trim(),
+    stage1_recipe_tib: document.getElementById("f-stage1-recipe-tib").value.trim(),
+    stage1_recipe_ss: document.getElementById("f-stage1-recipe-ss").value.trim(),
     stage2_days: Number(document.getElementById("f-stage2-days").value),
-    stage2_recipe: document.getElementById("f-stage2-recipe").value.trim(),
-    stage3_recipe: document.getElementById("f-stage3-recipe").value.trim(),
+    stage2_recipe_tib: document.getElementById("f-stage2-recipe-tib").value.trim(),
+    stage2_recipe_ss: document.getElementById("f-stage2-recipe-ss").value.trim(),
+    stage3_recipe_tib: document.getElementById("f-stage3-recipe-tib").value.trim(),
+    stage3_recipe_ss: document.getElementById("f-stage3-recipe-ss").value.trim(),
   };
   if (!payload.plant_name) return alert("กรุณาใส่ชื่อชนิดพืช");
   const btn = document.getElementById("save-plant-btn");
@@ -242,7 +273,21 @@ async function loadNotifySettings() {
   users.forEach(u => {
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `<div class="plant-name">${u.display_name}</div><div class="muted">${u.active ? "รับแจ้งเตือนอยู่" : "ปิดแจ้งเตือนแล้ว"}</div>`;
+    card.innerHTML = `
+      <div class="plant-name">${u.display_name}</div>
+      <div class="muted">${u.active ? "รับแจ้งเตือนอยู่" : "ปิดแจ้งเตือนแล้ว"}</div>
+      <div class="muted" style="margin-top:6px;word-break:break-all;cursor:pointer;border:1px dashed var(--border);border-radius:8px;padding:6px 8px;" data-line-id="${u.line_user_id}">${u.line_user_id}</div>
+    `;
+    const idBox = card.querySelector("[data-line-id]");
+    idBox.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(u.line_user_id);
+        idBox.textContent = "คัดลอกแล้ว ✓";
+        setTimeout(() => { idBox.textContent = u.line_user_id; }, 1500);
+      } catch (err) {
+        alert("Line ID: " + u.line_user_id);
+      }
+    });
     list.appendChild(card);
   });
 }

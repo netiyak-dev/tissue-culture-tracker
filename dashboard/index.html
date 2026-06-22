@@ -80,8 +80,8 @@ async function loadDashboard() {
       dueList.innerHTML = data.due_soon.map(d => `
         <div class="due-item">
           <div>
-            <div class="name">${d.plant_name}</div>
-            <div class="loc">ชั้น ${d.shelf}/${d.sub_shelf} · สูตรรอบหน้า: ${d.next_recipe || "-"}</div>
+            <div class="name">${d.plant_name} <span class="muted">(${d.stage} ${d.round_in_stage})</span></div>
+            <div class="loc">ชั้น ${d.shelf}/${d.sub_shelf} · ${d.media_type}${d.bottle_no ? " #" + d.bottle_no : ""} · สูตรรอบหน้า: ${d.next_recipe || "-"}</div>
           </div>
           <div class="date">${d.next_transfer_date}</div>
         </div>

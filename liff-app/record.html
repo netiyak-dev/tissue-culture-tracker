@@ -35,6 +35,19 @@
     </div>
 
     <div class="field">
+      <label>ประเภทรอบนี้</label>
+      <div id="media-type-grid" class="chip-grid chip-grid-2">
+        <div class="chip chip-lg" data-media="SS">SS<span class="sub">กึ่งแข็ง</span></div>
+        <div class="chip chip-lg" data-media="TIB">TIB<span class="sub">อาหารเหลว</span></div>
+      </div>
+    </div>
+
+    <div class="field hidden" id="bottle-no-field">
+      <label>หมายเลขขวด (สำหรับ TIB)</label>
+      <input type="text" id="bottle-no" placeholder="เช่น TIB-014" />
+    </div>
+
+    <div class="field">
       <label>ชั้นเก็บ</label>
       <div id="shelf-grid" class="chip-grid"></div>
     </div>
@@ -58,6 +71,7 @@
 <script>
 let selectedShelf = null;
 let selectedSub = null;
+let selectedMedia = null;
 let plantsCache = [];
 let storageCache = { shelves: [], subs: [] };
 
@@ -96,6 +110,16 @@ function pickSub(val, chip, container) {
   selectedSub = val;
 }
 
+// ---------- เลือกประเภทรอบ TIB / SS ----------
+document.querySelectorAll("#media-type-grid .chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll("#media-type-grid .chip").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    selectedMedia = chip.dataset.media;
+    document.getElementById("bottle-no-field").classList.toggle("hidden", selectedMedia !== "TIB");
+  });
+});
+
 async function loadStorage() {
   storageCache = await TissueApp.call("listStorage");
   renderChips(document.getElementById("shelf-grid"), storageCache.shelves, pickShelf, "ชั้นใหม่ (เช่น 5)");
@@ -128,9 +152,12 @@ document.getElementById("plant-select").addEventListener("change", updateTitle);
 document.getElementById("save-btn").addEventListener("click", async () => {
   const plant_id = document.getElementById("plant-select").value;
   const quantity = document.getElementById("quantity").value;
+  const bottle_no = document.getElementById("bottle-no").value.trim();
 
   if (!plant_id) return alert("กรุณาเลือกชนิดพืช");
   if (!quantity || Number(quantity) <= 0) return alert("กรุณาใส่จำนวนต้นที่ทำได้");
+  if (!selectedMedia) return alert("กรุณาเลือกประเภทรอบนี้ (TIB หรือ SS)");
+  if (selectedMedia === "TIB" && !bottle_no) return alert("กรุณาใส่หมายเลขขวด (จำเป็นสำหรับ TIB)");
   if (!selectedShelf) return alert("กรุณาเลือกชั้นเก็บ");
   if (!selectedSub) return alert("กรุณาเลือกช่องเก็บ");
 
@@ -140,6 +167,8 @@ document.getElementById("save-btn").addEventListener("click", async () => {
     const result = await TissueApp.call("recordTransfer", {
       plant_id,
       quantity: Number(quantity),
+      media_type: selectedMedia,
+      bottle_no: selectedMedia === "TIB" ? bottle_no : "",
       shelf: selectedShelf,
       sub_shelf: selectedSub,
       recorded_by: (TissueApp.profile && TissueApp.profile.displayName) || "ไม่ระบุชื่อ",
@@ -150,7 +179,9 @@ document.getElementById("save-btn").addEventListener("click", async () => {
     const banner = document.getElementById("result-banner");
     banner.classList.remove("hidden");
 
-    let detail = `ระยะ: ${result.stage} · สูตร: ${result.recipe_used}`;
+    let detail = `ระยะ: ${result.stage} (รอบที่ ${result.round_in_stage}) · สูตร: ${result.recipe_used}`;
+    detail += ` · ประเภท: ${result.media_type}`;
+    if (result.bottle_no) detail += ` (ขวดเลขที่ ${result.bottle_no})`;
     detail += result.next_transfer_date
       ? ` · รอบถัดไป: ${result.next_transfer_date}`
       : ` · จบรอบติดตาม (พร้อมออกปลูกแล้ว)`;
@@ -167,8 +198,12 @@ document.getElementById("record-next-btn").addEventListener("click", () => {
   document.getElementById("after-actions").classList.add("hidden");
   document.getElementById("result-banner").classList.add("hidden");
   document.getElementById("quantity").value = "";
+  document.getElementById("bottle-no").value = "";
+  document.getElementById("bottle-no-field").classList.add("hidden");
+  document.querySelectorAll("#media-type-grid .chip").forEach(c => c.classList.remove("active"));
   selectedShelf = null;
   selectedSub = null;
+  selectedMedia = null;
   loadStorage();
 });
 
