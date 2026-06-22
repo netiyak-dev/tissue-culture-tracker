@@ -111,13 +111,13 @@ async function loadLotList(plant_id, plant_name) {
       </div>
       <div class="chevron">›</div>
     `;
-    card.addEventListener("click", () => loadTimeline(plant_id, plant_name, l.lot_no));
+    card.addEventListener("click", () => loadTimeline(plant_id, plant_name, l.lot_no, l.lab));
     list.appendChild(card);
   });
 }
 
 // ---------- ขั้นที่ 3 ----------
-async function loadTimeline(plant_id, plant_name, lot_no) {
+async function loadTimeline(plant_id, plant_name, lot_no, lab) {
   show("view-timeline");
   setBack("lots", `${plant_name} — ล็อต ${lot_no}`);
   document.getElementById("back-btn").onclick = (e) => { e.preventDefault(); loadLotList(plant_id, plant_name); };
@@ -127,7 +127,7 @@ async function loadTimeline(plant_id, plant_name, lot_no) {
   summary.innerHTML = '<p class="muted">กำลังโหลด...</p>';
   list.innerHTML = "";
 
-  const history = await TissueApp.call("getLotHistory", { plant_id, lot_no });
+  const history = await TissueApp.call("getLotHistory", { plant_id, lot_no, lab: lab || TissueApp.myLab });
   if (history.length === 0) {
     summary.innerHTML = '<p class="muted">ไม่พบประวัติของล็อตนี้</p>';
     return;
@@ -160,10 +160,11 @@ async function loadTimeline(plant_id, plant_name, lot_no) {
   badge.classList.remove("hidden");
   const qPlant = TissueApp.getParam("plant_id");
   const qLotNo = TissueApp.getParam("lot_no");
+  const qLab = TissueApp.getParam("lab");
   if (qPlant && qLotNo) {
     plantsCache = await TissueApp.call("listPlantsWithCount");
     const plant = plantsCache.find(p => p.plant_id === qPlant);
-    await loadTimeline(qPlant, plant ? plant.plant_name : "", qLotNo);
+    await loadTimeline(qPlant, plant ? plant.plant_name : "", qLotNo, qLab || TissueApp.myLab);
     return;
   }
   await loadPlantList();

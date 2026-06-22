@@ -181,6 +181,17 @@ function requireAdmin(payload) {
   return me;
 }
 
+/**
+ * หา Lab ที่จะใช้กรองข้อมูลจริงสำหรับคำขอนี้
+ * - User ทั่วไป: ผูกกับ Lab ตัวเองเสมอ ไม่สนใจ payload.view_lab ที่ส่งมา (ป้องกันแก้ payload เพื่อแอบดู Lab อื่น)
+ * - Admin: เลือกได้ — ถ้าไม่ส่ง view_lab มา (หรือส่งมาไม่ตรงกับ LABS) = null หมายถึง "ดูรวมทุก Lab"
+ *   ถ้าส่ง view_lab มาเป็น KA/NJ/CC = ดูแค่ Lab นั้น
+ */
+function resolveViewLab(me, payload) {
+  if (!me.isAdmin) return me.lab;
+  return (payload.view_lab && LABS.indexOf(payload.view_lab) !== -1) ? payload.view_lab : null;
+}
+
 // ===================================================================
 // API ROUTER — เรียกจาก liff-app/js/api.js ด้วย { action, payload }
 // ===================================================================
@@ -280,8 +291,9 @@ function listPlantsFull() {
 
 function listPlantsWithCount(payload) {
   const me = getCurrentUser(payload);
+  const viewLab = resolveViewLab(me, payload);
   const plants = getSheetData("PlantTypes").filter(p => p.active !== false);
-  const transfers = getSheetData("Transfers").filter(t => t.lab && (me.isAdmin || t.lab === me.lab));
+  const transfers = getSheetData("Transfers").filter(t => t.lab && (viewLab ? t.lab === viewLab : me.isAdmin));
   return plants.map(p => {
     const latestByLot = {};
     transfers.filter(t => t.plant_id === p.plant_id).forEach(t => {
@@ -558,26 +570,34 @@ function computeDashboardData(transfers, plants, storage) {
   return { total_lots, total_plants, due_soon, by_plant, storage_overview };
 }
 
-/** Dashboard ของผู้เรียก — User เห็นแค่ Lab ตัวเอง, Admin เห็นรวมทุก Lab */
+/**
+ * Dashboard ของผู้เรียก — User เห็นแค่ Lab ตัวเอง
+ * Admin เลือกได้ผ่าน payload.view_lab: ไม่ส่งมา = ดูรวมทุก Lab, ส่ง KA/NJ/CC = ดูแค่ Lab นั้น
+ */
 function getDashboard(payload) {
   const me = getCurrentUser(payload);
-  const transfers = getSheetData("Transfers").filter(t => t.lab && (me.isAdmin || t.lab === me.lab));
+  const viewLab = resolveViewLab(me, payload);
+  const transfers = getSheetData("Transfers").filter(t => t.lab && (viewLab ? t.lab === viewLab : me.isAdmin));
   const plants = getSheetData("PlantTypes");
   const storage = getSheetData("Storage").filter(s => s.active !== false);
   const data = computeDashboardData(transfers, plants, storage);
-  return { ...data, lab: me.isAdmin ? null : me.lab };
+  return { ...data, lab: viewLab, is_admin: me.isAdmin };
 }
 
 // ===================================================================
 // Handlers: ประวัติย้อนหลังของล็อต (track ว่าทำ subculture มากี่รอบแล้ว)
 // ===================================================================
 
-/** รายการล็อตที่ "กำลังติดตามอยู่" ของชนิดพืชหนึ่ง (ยังไม่ถึงระยะพร้อมออกปลูก) — เห็นเฉพาะ Lab ตัวเอง ยกเว้นแอดมินเห็นทุก Lab */
+/**
+ * รายการล็อตที่ "กำลังติดตามอยู่" ของชนิดพืชหนึ่ง (ยังไม่ถึงระยะพร้อมออกปลูก)
+ * User เห็นเฉพาะ Lab ตัวเอง — Admin เลือกได้ผ่าน payload.view_lab (ไม่ส่งมา = เห็นรวมทุก Lab)
+ */
 function listActiveLots(payload) {
   if (!payload.plant_id) throw new Error("กรุณาระบุชนิดพืช");
   const me = getCurrentUser(payload);
+  const viewLab = resolveViewLab(me, payload);
   const transfers = getSheetData("Transfers").filter(t =>
-    t.plant_id === payload.plant_id && t.lab && (me.isAdmin || t.lab === me.lab)
+    t.plant_id === payload.plant_id && t.lab && (viewLab ? t.lab === viewLab : me.isAdmin)
   );
   const latestByLot = {};
   transfers.forEach(t => {
@@ -605,13 +625,15 @@ function listActiveLots(payload) {
 /**
  * ประวัติทุกรอบของล็อตเดียว (ไล่ย้อนจากรอบปัจจุบันกลับไปรอบที่ 1)
  * อิงรอบที่ตาม (plant_id, lot_no, lab) ไม่ใช่ตำแหน่งเก็บ — เพราะล็อตอาจย้ายชั้น/ช่องระหว่างรอบได้
- * ดูได้แค่ล็อตของ Lab ตัวเอง ยกเว้นแอดมินดูได้ทุก Lab
+ * ต้องระบุ lab มาให้ชัดเจนเสมอ (ไม่ใช่แค่ plant_id+lot_no) เพราะ Admin มองเห็นได้หลาย Lab พร้อมกัน —
+ * ถ้าสอง Lab บังเอิญใช้หมายเลขล็อตเดียวกันสำหรับพืชชนิดเดียวกัน จะไม่ปนกัน
  */
 function getLotHistory(payload) {
-  if (!payload.plant_id || !payload.lot_no) throw new Error("ข้อมูลไม่ครบ");
+  if (!payload.plant_id || !payload.lot_no || !payload.lab) throw new Error("ข้อมูลไม่ครบ");
   const me = getCurrentUser(payload);
+  if (!me.isAdmin && payload.lab !== me.lab) throw new Error("ไม่มีสิทธิ์ดูข้อมูลของ Lab นี้");
   const transfers = getSheetData("Transfers").filter(t =>
-    t.plant_id === payload.plant_id && String(t.lot_no) === String(payload.lot_no) && t.lab && (me.isAdmin || t.lab === me.lab)
+    t.plant_id === payload.plant_id && String(t.lot_no) === String(payload.lot_no) && t.lab === payload.lab
   );
   let current = null;
   transfers.forEach(t => {
