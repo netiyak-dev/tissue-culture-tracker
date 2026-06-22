@@ -117,10 +117,26 @@ async function loadPlantSettings() {
           <div class="plant-name">${p.plant_name} ${p.active ? "" : '<span class="muted">(ปิดใช้งาน)</span>'}</div>
           <div class="muted">ขยาย ${p.stage1_days} วัน → กระตุ้นราก ${p.stage2_days} วัน → พร้อมออกปลูก</div>
         </div>
-        <button class="btn btn-ghost" style="width:auto;padding:6px 10px;" data-edit="${p.plant_id}">แก้ไข</button>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          <button class="btn btn-ghost" style="width:auto;padding:6px 10px;" data-edit="${p.plant_id}">แก้ไข</button>
+          ${p.active ? `<button class="btn btn-ghost" style="width:auto;padding:6px 10px;color:var(--alert);" data-deactivate="${p.plant_id}">ปิดใช้งาน</button>` : ""}
+        </div>
       </div>
     `;
     card.querySelector("[data-edit]").addEventListener("click", () => openPlantForm(p));
+    const deactivateBtn = card.querySelector("[data-deactivate]");
+    if (deactivateBtn) {
+      deactivateBtn.addEventListener("click", async () => {
+        const ok = confirm(`ปิดการใช้งาน "${p.plant_name}" ใช่ไหม?\n(ข้อมูลการถ่ายโอนเดิมจะไม่หาย แค่จะไม่ให้เลือกชนิดนี้ในการบันทึกครั้งใหม่)`);
+        if (!ok) return;
+        try {
+          await TissueApp.call("deactivatePlantType", { plant_id: p.plant_id });
+          await loadPlantSettings();
+        } catch (err) {
+          alert("ปิดการใช้งานไม่สำเร็จ: " + err.message);
+        }
+      });
+    }
     list.appendChild(card);
   });
 }
@@ -176,10 +192,30 @@ async function loadStorageSettings() {
 function renderStorageChips(container, items, type, promptText) {
   container.innerHTML = "";
   items.forEach(val => {
+    const wrap = document.createElement("div");
+    wrap.className = "chip-wrap";
     const chip = document.createElement("div");
     chip.className = "chip";
     chip.textContent = val;
-    container.appendChild(chip);
+    wrap.appendChild(chip);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "chip-remove";
+    removeBtn.type = "button";
+    removeBtn.textContent = "✕";
+    removeBtn.title = "ปิดการใช้งาน";
+    removeBtn.addEventListener("click", async () => {
+      const ok = confirm(`ปิดการใช้งาน "${val}" ใช่ไหม?\n(ข้อมูลเดิมที่เคยบันทึกไว้จะไม่หาย แค่จะไม่ให้เลือกใหม่อีก)`);
+      if (!ok) return;
+      try {
+        await TissueApp.call("deactivateStorageValue", { type, value: val });
+        await loadStorageSettings();
+      } catch (err) {
+        alert("ปิดการใช้งานไม่สำเร็จ: " + err.message);
+      }
+    });
+    wrap.appendChild(removeBtn);
+    container.appendChild(wrap);
   });
   const addChip = document.createElement("div");
   addChip.className = "chip add-new";
