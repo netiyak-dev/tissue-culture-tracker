@@ -1,0 +1,341 @@
+/* ===================================================================
+   shared/style.css
+   โทนสี/ฟอนต์/คอมโพเนนต์กลาง — ดูที่มาของค่าใน CLAUDE.md
+   ห้ามแก้สีตรงนี้แบบจุดเดียว ให้แก้ที่ CLAUDE.md ก่อนแล้วค่อยย้อนมาที่นี่
+   =================================================================== */
+
+:root {
+  /* สี */
+  --forest: #1B4332;
+  --leaf: #40916C;
+  --leaf-light: #74C69D;
+  --mint: #D8F3DC;
+  --bg: #FAFAF7;
+  --surface: #FFFFFF;
+  --text: #1B1E1C;
+  --text-muted: #6B7280;
+  --border: #D9DDD9;
+  --alert: #B65C1F;
+  --alert-bg: #F6E8DD;
+
+  /* ระยะห่าง */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* รูปทรง */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --shadow-card: 0 1px 2px rgba(27, 67, 50, 0.06), 0 2px 8px rgba(27, 67, 50, 0.06);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Sarabun', sans-serif;
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+h1, h2, h3 {
+  font-weight: 700;
+  color: var(--forest);
+  margin: 0 0 var(--space-3) 0;
+  line-height: 1.3;
+}
+
+h1 { font-size: 22px; }
+h2 { font-size: 18px; }
+h3 { font-size: 15px; font-weight: 600; color: var(--text); }
+
+p { line-height: 1.6; margin: 0 0 var(--space-3) 0; }
+
+.muted { color: var(--text-muted); font-size: 13px; }
+
+/* ---------- เลย์เอาต์หลัก ---------- */
+.screen {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  padding: var(--space-4) var(--space-4) calc(var(--space-6) * 2);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) 0 var(--space-3) 0;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 5;
+}
+
+.topbar .back-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--forest);
+  font-size: 18px;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.topbar h1 { margin: 0; }
+
+/* ---------- ปุ่ม ---------- */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.05s ease, opacity 0.15s ease;
+}
+.btn:active { transform: scale(0.98); }
+
+.btn-primary { background: var(--forest); color: #fff; }
+.btn-secondary { background: var(--mint); color: var(--forest); }
+.btn-outline { background: var(--surface); color: var(--forest); border: 1.5px solid var(--leaf); }
+.btn-ghost { background: transparent; color: var(--text-muted); font-weight: 400; }
+.btn-block { margin-bottom: var(--space-3); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---------- การ์ด ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+  box-shadow: var(--shadow-card);
+}
+
+.card-tap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  cursor: pointer;
+}
+.card-tap:active { background: var(--mint); }
+
+.card-tap .plant-name { font-weight: 600; font-size: 16px; color: var(--text); }
+.card-tap .plant-count { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+.card-tap .chevron { color: var(--leaf); font-size: 20px; flex-shrink: 0; }
+
+/* ---------- ฟอร์ม ---------- */
+.field { margin-bottom: var(--space-5); }
+.field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+.field input[type="text"],
+.field input[type="number"],
+.field select,
+.field textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 16px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: var(--leaf);
+}
+
+/* ---------- ตัวเลือกแบบปุ่มกริด (ชั้น/ช่อง) ---------- */
+.chip-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+.chip {
+  text-align: center;
+  padding: 10px 4px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  user-select: none;
+}
+.chip.active { background: var(--forest); border-color: var(--forest); color: #fff; }
+.chip.add-new { color: var(--leaf); border-style: dashed; }
+
+/* ---------- Stepper ระยะการเจริญเติบโต (signature element) ---------- */
+.stage-stepper {
+  display: flex;
+  align-items: center;
+  margin: var(--space-3) 0;
+}
+.stage-step {
+  flex: 1;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  position: relative;
+}
+.stage-step .dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--border);
+  margin: 0 auto var(--space-1);
+}
+.stage-step.done .dot { background: var(--leaf-light); }
+.stage-step.current .dot {
+  background: var(--forest);
+  box-shadow: 0 0 0 4px var(--mint);
+}
+.stage-step.current { color: var(--forest); font-weight: 600; }
+.stage-line {
+  position: absolute;
+  top: 6px;
+  height: 2px;
+  background: var(--border);
+  left: -50%;
+  right: 50%;
+  z-index: -1;
+}
+.stage-step.done .stage-line, .stage-step.current .stage-line { background: var(--leaf-light); }
+.stage-step:first-child .stage-line { display: none; }
+
+/* ---------- แถบแจ้งผล ---------- */
+.banner {
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.banner-success { background: var(--mint); color: var(--forest); }
+.banner-alert { background: var(--alert-bg); color: var(--alert); }
+.banner-success .big { font-weight: 700; font-size: 17px; margin-bottom: var(--space-1); }
+.banner-success .detail { font-size: 14px; line-height: 1.6; }
+
+/* ---------- แท็บ (หน้าตั้งค่า) ---------- */
+.tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: var(--space-3) 0;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+}
+.tab.active { color: var(--forest); border-bottom-color: var(--forest); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ---------- รายการสรุป (dashboard) ---------- */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.stat-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  text-align: center;
+}
+.stat-box .num { font-size: 24px; font-weight: 700; color: var(--forest); }
+.stat-box .label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+.due-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.due-item:last-child { border-bottom: none; }
+.due-item .name { font-weight: 600; }
+.due-item .loc { font-size: 12px; color: var(--text-muted); }
+.due-item .date {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--alert);
+  background: var(--alert-bg);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.storage-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  text-align: center;
+}
+.storage-cell {
+  background: var(--mint);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) 2px;
+}
+.storage-cell .n { font-size: 18px; font-weight: 700; color: var(--forest); }
+.storage-cell .loc { font-size: 11px; color: var(--text-muted); }
+.storage-cell.empty { background: var(--surface); border: 1px dashed var(--border); }
+
+/* ---------- ยูทิลิตี้ ---------- */
+.hidden { display: none !important; }
+.empty-state {
+  text-align: center;
+  color: var(--text-muted);
+  padding: var(--space-6) var(--space-4);
+}
+
+/* ---------- จอใหญ่ขึ้น (จาก mobile-first ขยับขึ้น) ---------- */
+@media (min-width: 720px) {
+  .screen { max-width: 640px; padding-top: var(--space-5); }
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    align-items: start;
+  }
+}

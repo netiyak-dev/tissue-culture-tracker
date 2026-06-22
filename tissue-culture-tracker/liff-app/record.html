@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>บันทึกการถ่ายโอน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/style.css" />
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+<div class="screen">
+
+  <div class="topbar">
+    <a href="index.html" class="back-btn">‹</a>
+    <h1 id="plant-title">บันทึกการถ่ายโอน</h1>
+  </div>
+
+  <!-- แสดงผลหลังบันทึกสำเร็จ -->
+  <div id="result-banner" class="banner banner-success hidden">
+    <div class="big">บันทึกแล้ว ✓</div>
+    <div class="detail" id="result-detail"></div>
+  </div>
+
+  <div id="form-wrap">
+    <div class="field">
+      <label>ชนิดพืช</label>
+      <select id="plant-select"></select>
+    </div>
+
+    <div class="field">
+      <label>จำนวนต้นที่ทำได้ (ต้น)</label>
+      <input type="number" id="quantity" inputmode="numeric" min="1" placeholder="เช่น 24" />
+    </div>
+
+    <div class="field">
+      <label>ชั้นเก็บ</label>
+      <div id="shelf-grid" class="chip-grid"></div>
+    </div>
+
+    <div class="field">
+      <label>ช่องเก็บ</label>
+      <div id="subshelf-grid" class="chip-grid"></div>
+    </div>
+
+    <button id="save-btn" class="btn btn-primary btn-block">บันทึก</button>
+  </div>
+
+  <div id="after-actions" class="hidden">
+    <button id="record-next-btn" class="btn btn-primary btn-block">บันทึกขวดถัดไป</button>
+    <a href="index.html" class="btn btn-outline btn-block">กลับหน้าหลัก</a>
+  </div>
+
+</div>
+
+<script src="js/api.js"></script>
+<script>
+let selectedShelf = null;
+let selectedSub = null;
+let plantsCache = [];
+let storageCache = { shelves: [], subs: [] };
+
+function renderChips(container, items, onPick, addLabel) {
+  container.innerHTML = "";
+  items.forEach(val => {
+    const chip = document.createElement("div");
+    chip.className = "chip";
+    chip.textContent = val;
+    chip.addEventListener("click", () => onPick(val, chip, container));
+    container.appendChild(chip);
+  });
+  const addChip = document.createElement("div");
+  addChip.className = "chip add-new";
+  addChip.textContent = "+ เพิ่ม";
+  addChip.addEventListener("click", async () => {
+    const val = prompt(addLabel);
+    if (!val) return;
+    await TissueApp.call("addStorageValue", {
+      type: container === document.getElementById("shelf-grid") ? "shelf" : "sub_shelf",
+      value: val,
+    });
+    await loadStorage();
+  });
+  container.appendChild(addChip);
+}
+
+function pickShelf(val, chip, container) {
+  [...container.children].forEach(c => c.classList.remove("active"));
+  chip.classList.add("active");
+  selectedShelf = val;
+}
+function pickSub(val, chip, container) {
+  [...container.children].forEach(c => c.classList.remove("active"));
+  chip.classList.add("active");
+  selectedSub = val;
+}
+
+async function loadStorage() {
+  storageCache = await TissueApp.call("listStorage");
+  renderChips(document.getElementById("shelf-grid"), storageCache.shelves, pickShelf, "ชั้นใหม่ (เช่น 5)");
+  renderChips(document.getElementById("subshelf-grid"), storageCache.subs, pickSub, "ช่องใหม่ (เช่น D)");
+}
+
+async function loadPlants() {
+  plantsCache = await TissueApp.call("listPlantsWithCount");
+  const sel = document.getElementById("plant-select");
+  sel.innerHTML = "";
+  plantsCache.forEach(p => {
+    const opt = document.createElement("option");
+    opt.value = p.plant_id;
+    opt.textContent = p.plant_name;
+    sel.appendChild(opt);
+  });
+  const requestedId = TissueApp.getParam("plant_id");
+  if (requestedId) sel.value = requestedId;
+  updateTitle();
+}
+
+function updateTitle() {
+  const sel = document.getElementById("plant-select");
+  const plant = plantsCache.find(p => p.plant_id === sel.value);
+  document.getElementById("plant-title").textContent = plant ? plant.plant_name : "บันทึกการถ่ายโอน";
+}
+
+document.getElementById("plant-select").addEventListener("change", updateTitle);
+
+document.getElementById("save-btn").addEventListener("click", async () => {
+  const plant_id = document.getElementById("plant-select").value;
+  const quantity = document.getElementById("quantity").value;
+
+  if (!plant_id) return alert("กรุณาเลือกชนิดพืช");
+  if (!quantity || Number(quantity) <= 0) return alert("กรุณาใส่จำนวนต้นที่ทำได้");
+  if (!selectedShelf) return alert("กรุณาเลือกชั้นเก็บ");
+  if (!selectedSub) return alert("กรุณาเลือกช่องเก็บ");
+
+  const btn = document.getElementById("save-btn");
+  TissueApp.setLoading(btn, true);
+  try {
+    const result = await TissueApp.call("recordTransfer", {
+      plant_id,
+      quantity: Number(quantity),
+      shelf: selectedShelf,
+      sub_shelf: selectedSub,
+      recorded_by: (TissueApp.profile && TissueApp.profile.displayName) || "ไม่ระบุชื่อ",
+    });
+
+    document.getElementById("form-wrap").classList.add("hidden");
+    document.getElementById("after-actions").classList.remove("hidden");
+    const banner = document.getElementById("result-banner");
+    banner.classList.remove("hidden");
+
+    let detail = `ระยะ: ${result.stage} · สูตร: ${result.recipe_used}`;
+    detail += result.next_transfer_date
+      ? ` · รอบถัดไป: ${result.next_transfer_date}`
+      : ` · จบรอบติดตาม (พร้อมออกปลูกแล้ว)`;
+    document.getElementById("result-detail").textContent = detail;
+  } catch (err) {
+    alert("บันทึกไม่สำเร็จ: " + err.message);
+  } finally {
+    TissueApp.setLoading(btn, false);
+  }
+});
+
+document.getElementById("record-next-btn").addEventListener("click", () => {
+  document.getElementById("form-wrap").classList.remove("hidden");
+  document.getElementById("after-actions").classList.add("hidden");
+  document.getElementById("result-banner").classList.add("hidden");
+  document.getElementById("quantity").value = "";
+  selectedShelf = null;
+  selectedSub = null;
+  loadStorage();
+});
+
+(async () => {
+  await TissueApp.init();
+  await Promise.all([loadPlants(), loadStorage()]);
+})();
+</script>
+</body>
+</html>

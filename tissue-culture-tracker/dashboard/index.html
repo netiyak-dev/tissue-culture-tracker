@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>สรุปข้อมูล — เพาะเลี้ยงเนื้อเยื่อ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/style.css" />
+</head>
+<body>
+<div class="screen" style="max-width:720px;">
+
+  <div class="topbar">
+    <a href="../liff-app/index.html" class="back-btn">‹</a>
+    <h1>สรุปข้อมูล</h1>
+  </div>
+
+  <div class="stat-row" id="stat-row">
+    <div class="stat-box"><div class="num">–</div><div class="label">ขวดทั้งหมด</div></div>
+    <div class="stat-box"><div class="num">–</div><div class="label">ต้นรวม</div></div>
+    <div class="stat-box"><div class="num">–</div><div class="label">ใกล้ถึงกำหนด</div></div>
+  </div>
+
+  <div class="dashboard-grid">
+    <div>
+      <h2>ใกล้ถึงกำหนดถ่ายโอน</h2>
+      <div class="card" id="due-card">
+        <div id="due-list"><p class="muted">กำลังโหลด...</p></div>
+      </div>
+
+      <h2>ภาพรวมที่เก็บ</h2>
+      <div class="card">
+        <div id="storage-overview" class="storage-grid"></div>
+      </div>
+    </div>
+
+    <div>
+      <h2>ภาพรวมตามชนิดพืช</h2>
+      <div id="plant-overview"></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="../liff-app/js/api.js"></script>
+<script>
+function stageStepper(stage) {
+  const stages = ["ขยาย", "กระตุ้นราก", "พร้อมออกปลูก"];
+  const currentIdx = stages.indexOf(stage);
+  return `
+    <div class="stage-stepper">
+      ${stages.map((s, i) => {
+        let cls = "stage-step";
+        if (i < currentIdx) cls += " done";
+        if (i === currentIdx) cls += " current";
+        return `<div class="${cls}"><div class="stage-line"></div><div class="dot"></div>${s}</div>`;
+      }).join("")}
+    </div>
+  `;
+}
+
+async function loadDashboard() {
+  try {
+    const data = await TissueApp.call("getDashboard");
+
+    // แถบสรุป
+    const statRow = document.getElementById("stat-row");
+    statRow.innerHTML = `
+      <div class="stat-box"><div class="num">${data.total_bottles}</div><div class="label">ขวดทั้งหมด</div></div>
+      <div class="stat-box"><div class="num">${data.total_plants}</div><div class="label">ต้นรวม</div></div>
+      <div class="stat-box"><div class="num">${data.due_soon.length}</div><div class="label">ใกล้ถึงกำหนด</div></div>
+    `;
+
+    // ใกล้ถึงกำหนด
+    const dueList = document.getElementById("due-list");
+    if (data.due_soon.length === 0) {
+      dueList.innerHTML = '<p class="muted">ไม่มีขวดที่ใกล้ถึงกำหนดในช่วงนี้</p>';
+    } else {
+      dueList.innerHTML = data.due_soon.map(d => `
+        <div class="due-item">
+          <div>
+            <div class="name">${d.plant_name}</div>
+            <div class="loc">ชั้น ${d.shelf}/${d.sub_shelf} · สูตรรอบหน้า: ${d.next_recipe || "-"}</div>
+          </div>
+          <div class="date">${d.next_transfer_date}</div>
+        </div>
+      `).join("");
+    }
+
+    // ภาพรวมตามชนิดพืช
+    const plantOverview = document.getElementById("plant-overview");
+    plantOverview.innerHTML = data.by_plant.map(p => `
+      <div class="card">
+        <h3>${p.plant_name} <span class="muted">· ${p.total} ขวด</span></h3>
+        ${stageStepper(p.dominant_stage)}
+        <div class="muted">ขยาย ${p.stage_counts.ขยาย} · กระตุ้นราก ${p.stage_counts.กระตุ้นราก} · พร้อมออกปลูก ${p.stage_counts.พร้อมออกปลูก}</div>
+      </div>
+    `).join("") || '<p class="muted">ยังไม่มีข้อมูล</p>';
+
+    // ภาพรวมที่เก็บ
+    const storageEl = document.getElementById("storage-overview");
+    storageEl.innerHTML = data.storage_overview.map(s => `
+      <div class="storage-cell ${s.count === 0 ? 'empty' : ''}">
+        <div class="n">${s.count}</div>
+        <div class="loc">${s.shelf}/${s.sub_shelf}</div>
+      </div>
+    `).join("");
+
+  } catch (err) {
+    document.getElementById("due-list").innerHTML = `<p class="muted">โหลดข้อมูลไม่สำเร็จ: ${err.message}</p>`;
+  }
+}
+
+(async () => {
+  await TissueApp.init();
+  loadDashboard();
+})();
+</script>
+</body>
+</html>

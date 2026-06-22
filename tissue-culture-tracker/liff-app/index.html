@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>บันทึกถ่ายโอนเนื้อเยื่อ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/style.css" />
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+<div class="screen">
+
+  <div class="topbar">
+    <h1>เลือกชนิดพืช</h1>
+  </div>
+  <p class="muted">แตะชนิดพืชที่จะบันทึกการถ่ายโอนเนื้อเยื่อรอบนี้</p>
+
+  <div id="plant-list">
+    <!-- เติมด้วย JS -->
+  </div>
+
+  <div id="empty-state" class="empty-state hidden">
+    ยังไม่มีชนิดพืชในระบบ<br>เริ่มจากหน้า "ตั้งค่า" เพื่อเพิ่มชนิดพืชชนิดแรกก่อน
+  </div>
+
+  <a href="settings.html" class="btn btn-outline btn-block" style="margin-top: 24px;">⚙️ ตั้งค่าชนิดพืช / ที่เก็บ</a>
+  <a href="../dashboard/index.html" class="btn btn-secondary btn-block">📊 ดูสรุปข้อมูล</a>
+
+</div>
+
+<script src="js/api.js"></script>
+<script>
+async function loadPlants() {
+  const list = document.getElementById("plant-list");
+  const empty = document.getElementById("empty-state");
+  list.innerHTML = '<p class="muted">กำลังโหลด...</p>';
+  try {
+    const plants = await TissueApp.call("listPlantsWithCount");
+    list.innerHTML = "";
+    if (!plants || plants.length === 0) {
+      empty.classList.remove("hidden");
+      return;
+    }
+    plants.forEach(p => {
+      const card = document.createElement("div");
+      card.className = "card card-tap";
+      card.innerHTML = `
+        <div>
+          <div class="plant-name">${p.plant_name}</div>
+          <div class="plant-count">ขวดที่ติดตามอยู่: ${p.active_count} ขวด</div>
+        </div>
+        <div class="chevron">›</div>
+      `;
+      card.addEventListener("click", () => {
+        window.location.href = "record.html?plant_id=" + encodeURIComponent(p.plant_id);
+      });
+      list.appendChild(card);
+    });
+  } catch (err) {
+    list.innerHTML = `<p class="muted">โหลดข้อมูลไม่สำเร็จ: ${err.message}</p>`;
+  }
+}
+
+(async () => {
+  await TissueApp.init();
+  loadPlants();
+})();
+</script>
+</body>
+</html>

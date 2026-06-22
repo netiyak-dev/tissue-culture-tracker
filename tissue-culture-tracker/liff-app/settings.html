@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>ตั้งค่า</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/style.css" />
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+<div class="screen">
+
+  <div class="topbar">
+    <a href="index.html" class="back-btn">‹</a>
+    <h1>ตั้งค่า</h1>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="plants">ชนิดพืช</div>
+    <div class="tab" data-tab="storage">ที่เก็บ</div>
+    <div class="tab" data-tab="notify">ผู้รับแจ้งเตือน</div>
+  </div>
+
+  <!-- แท็บ 1: ชนิดพืช -->
+  <div class="tab-panel active" id="panel-plants">
+    <div id="plant-list"></div>
+    <button id="add-plant-btn" class="btn btn-outline btn-block">+ เพิ่มชนิดพืชใหม่</button>
+  </div>
+
+  <!-- แท็บ 2: ที่เก็บ -->
+  <div class="tab-panel" id="panel-storage">
+    <h3>ชั้นเก็บ</h3>
+    <div id="shelf-grid" class="chip-grid" style="margin-bottom:24px;"></div>
+    <h3>ช่องเก็บ</h3>
+    <div id="subshelf-grid" class="chip-grid"></div>
+    <p class="muted" style="margin-top:16px;">กดปุ่ม "+ เพิ่ม" เพื่อเพิ่มชั้น/ช่องใหม่ได้ทุกเมื่อ ไม่ต้องพึ่งช่างไอที</p>
+  </div>
+
+  <!-- แท็บ 3: ผู้รับแจ้งเตือน -->
+  <div class="tab-panel" id="panel-notify">
+    <p class="muted">รายชื่อคนที่เปิดแอปนี้ผ่าน Line แล้ว จะได้รับการแจ้งเตือนอัตโนมัติทุกเช้า</p>
+    <div id="notify-list"></div>
+  </div>
+
+</div>
+
+<!-- ฟอร์มเพิ่ม/แก้ชนิดพืช (modal แบบง่าย) -->
+<div id="plant-form-overlay" class="hidden" style="position:fixed;inset:0;background:rgba(27,67,50,0.4);display:flex;align-items:flex-end;z-index:20;">
+  <div style="background:var(--surface);width:100%;max-height:90vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:20px;">
+    <h2 id="plant-form-title">เพิ่มชนิดพืชใหม่</h2>
+
+    <div class="field">
+      <label>ชื่อชนิดพืช</label>
+      <input type="text" id="f-plant-name" placeholder="เช่น กล้วยไม้ A" />
+    </div>
+
+    <div class="field">
+      <label>ระยะขยาย — จำนวนวันก่อนเข้าระยะถัดไป</label>
+      <input type="number" id="f-stage1-days" placeholder="เช่น 30" />
+    </div>
+    <div class="field">
+      <label>ระยะขยาย — สูตรอาหารที่ใช้</label>
+      <input type="text" id="f-stage1-recipe" placeholder="เช่น MS + BA 1mg/L" />
+    </div>
+
+    <div class="field">
+      <label>ระยะกระตุ้นราก — จำนวนวันก่อนเข้าระยะถัดไป</label>
+      <input type="number" id="f-stage2-days" placeholder="เช่น 21" />
+    </div>
+    <div class="field">
+      <label>ระยะกระตุ้นราก — สูตรอาหารที่ใช้</label>
+      <input type="text" id="f-stage2-recipe" placeholder="เช่น MS + NAA 0.5mg/L" />
+    </div>
+
+    <div class="field">
+      <label>ระยะพร้อมออกปลูก — สูตรอาหารที่ใช้ (ระยะสุดท้าย)</label>
+      <input type="text" id="f-stage3-recipe" placeholder="เช่น MS ครึ่งสูตร (ไม่ใส่ฮอร์โมน)" />
+    </div>
+
+    <button id="save-plant-btn" class="btn btn-primary btn-block">บันทึก</button>
+    <button id="cancel-plant-btn" class="btn btn-ghost btn-block">ยกเลิก</button>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script>
+// ---------- แท็บ ----------
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
+  });
+});
+
+// ---------- แท็บชนิดพืช ----------
+let editingPlantId = null;
+
+async function loadPlantSettings() {
+  const list = document.getElementById("plant-list");
+  list.innerHTML = '<p class="muted">กำลังโหลด...</p>';
+  const plants = await TissueApp.call("listPlantsFull");
+  list.innerHTML = "";
+  if (plants.length === 0) {
+    list.innerHTML = '<p class="muted">ยังไม่มีชนิดพืช เริ่มเพิ่มชนิดแรกได้เลย</p>';
+    return;
+  }
+  plants.forEach(p => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div class="plant-name">${p.plant_name} ${p.active ? "" : '<span class="muted">(ปิดใช้งาน)</span>'}</div>
+          <div class="muted">ขยาย ${p.stage1_days} วัน → กระตุ้นราก ${p.stage2_days} วัน → พร้อมออกปลูก</div>
+        </div>
+        <button class="btn btn-ghost" style="width:auto;padding:6px 10px;" data-edit="${p.plant_id}">แก้ไข</button>
+      </div>
+    `;
+    card.querySelector("[data-edit]").addEventListener("click", () => openPlantForm(p));
+    list.appendChild(card);
+  });
+}
+
+function openPlantForm(p) {
+  editingPlantId = p ? p.plant_id : null;
+  document.getElementById("plant-form-title").textContent = p ? "แก้ไขชนิดพืช" : "เพิ่มชนิดพืชใหม่";
+  document.getElementById("f-plant-name").value = p ? p.plant_name : "";
+  document.getElementById("f-stage1-days").value = p ? p.stage1_days : "";
+  document.getElementById("f-stage1-recipe").value = p ? p.stage1_recipe : "";
+  document.getElementById("f-stage2-days").value = p ? p.stage2_days : "";
+  document.getElementById("f-stage2-recipe").value = p ? p.stage2_recipe : "";
+  document.getElementById("f-stage3-recipe").value = p ? p.stage3_recipe : "";
+  document.getElementById("plant-form-overlay").classList.remove("hidden");
+}
+
+document.getElementById("add-plant-btn").addEventListener("click", () => openPlantForm(null));
+document.getElementById("cancel-plant-btn").addEventListener("click", () => {
+  document.getElementById("plant-form-overlay").classList.add("hidden");
+});
+
+document.getElementById("save-plant-btn").addEventListener("click", async () => {
+  const payload = {
+    plant_id: editingPlantId,
+    plant_name: document.getElementById("f-plant-name").value.trim(),
+    stage1_days: Number(document.getElementById("f-stage1-days").value),
+    stage1_recipe: document.getElementById("f-stage1-recipe").value.trim(),
+    stage2_days: Number(document.getElementById("f-stage2-days").value),
+    stage2_recipe: document.getElementById("f-stage2-recipe").value.trim(),
+    stage3_recipe: document.getElementById("f-stage3-recipe").value.trim(),
+  };
+  if (!payload.plant_name) return alert("กรุณาใส่ชื่อชนิดพืช");
+  const btn = document.getElementById("save-plant-btn");
+  TissueApp.setLoading(btn, true);
+  try {
+    await TissueApp.call("savePlantType", payload);
+    document.getElementById("plant-form-overlay").classList.add("hidden");
+    await loadPlantSettings();
+  } catch (err) {
+    alert("บันทึกไม่สำเร็จ: " + err.message);
+  } finally {
+    TissueApp.setLoading(btn, false);
+  }
+});
+
+// ---------- แท็บที่เก็บ ----------
+async function loadStorageSettings() {
+  const storage = await TissueApp.call("listStorage");
+  renderStorageChips(document.getElementById("shelf-grid"), storage.shelves, "shelf", "ชั้นใหม่ (เช่น 5)");
+  renderStorageChips(document.getElementById("subshelf-grid"), storage.subs, "sub_shelf", "ช่องใหม่ (เช่น D)");
+}
+
+function renderStorageChips(container, items, type, promptText) {
+  container.innerHTML = "";
+  items.forEach(val => {
+    const chip = document.createElement("div");
+    chip.className = "chip";
+    chip.textContent = val;
+    container.appendChild(chip);
+  });
+  const addChip = document.createElement("div");
+  addChip.className = "chip add-new";
+  addChip.textContent = "+ เพิ่ม";
+  addChip.addEventListener("click", async () => {
+    const val = prompt(promptText);
+    if (!val) return;
+    await TissueApp.call("addStorageValue", { type, value: val });
+    await loadStorageSettings();
+  });
+  container.appendChild(addChip);
+}
+
+// ---------- แท็บผู้รับแจ้งเตือน ----------
+async function loadNotifySettings() {
+  const list = document.getElementById("notify-list");
+  list.innerHTML = '<p class="muted">กำลังโหลด...</p>';
+  const users = await TissueApp.call("listLineUsers");
+  list.innerHTML = "";
+  if (users.length === 0) {
+    list.innerHTML = '<p class="muted">ยังไม่มีใครเปิดผ่าน Line — เปิดแอปนี้จาก Line อย่างน้อย 1 ครั้งเพื่อรับแจ้งเตือน</p>';
+    return;
+  }
+  users.forEach(u => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="plant-name">${u.display_name}</div><div class="muted">${u.active ? "รับแจ้งเตือนอยู่" : "ปิดแจ้งเตือนแล้ว"}</div>`;
+    list.appendChild(card);
+  });
+}
+
+(async () => {
+  await TissueApp.init();
+  await Promise.all([loadPlantSettings(), loadStorageSettings(), loadNotifySettings()]);
+})();
+</script>
+</body>
+</html>
