@@ -246,14 +246,17 @@ function registerLineUser(payload) {
   const users = getSheetData("LineUsers");
   const existing = users.find(u => u.line_user_id === payload.line_user_id);
   const me = getCurrentUser(payload);
+  // role ที่คืนให้ฝั่งหน้าจอต้องอิง me.isAdmin (เช็ค ADMIN_LINE_USER_ID บูตสแตรปด้วย) ไม่ใช่แค่คอลัมน์ role ในชีตตรงๆ
+  // ไม่งั้นแอดมินคนแรกที่ปลดล็อกผ่าน bootstrap จะเห็นแอปเป็น user ธรรมดา (แท็บสิทธิ์ผู้ใช้/ป้าย Lab ผิด) ทั้งที่ getDashboard ฝั่ง backend เห็นว่าเป็นแอดมินแล้ว
+  const role = me.isAdmin ? "admin" : (existing ? (existing.role || "user") : "user");
   if (existing) {
     if (!existing.active || existing.display_name !== payload.display_name) {
       updateRow("LineUsers", existing._row, { ...existing, display_name: payload.display_name, active: true });
     }
-    return { updated: true, role: existing.role || "user", lab: existing.lab || "", approved: me.approved };
+    return { updated: true, role, lab: existing.lab || "", approved: me.approved };
   }
   appendRow("LineUsers", { line_user_id: payload.line_user_id, display_name: payload.display_name, role: "user", lab: "", active: true, approved: false });
-  return { created: true, role: "user", lab: "", approved: me.approved };
+  return { created: true, role, lab: "", approved: me.approved };
 }
 
 /** ผู้ใช้เลือก Lab ของตัวเองครั้งแรกที่เปิดแอป (ตั้งได้ครั้งเดียว — ถ้าจะเปลี่ยนทีหลังต้องให้แอดมินตั้งให้ผ่านหน้า "สิทธิ์ผู้ใช้") */
