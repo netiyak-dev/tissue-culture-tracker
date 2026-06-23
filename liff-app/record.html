@@ -47,8 +47,14 @@
     </div>
 
     <div class="field">
-      <label>จำนวนต้นที่ทำได้ (ต้น)</label>
-      <input type="number" id="quantity" inputmode="numeric" min="1" value="20" placeholder="เช่น 24" />
+      <label>จำนวนขวดที่ทำได้ (ขวด)</label>
+      <input type="number" id="bottle-count" inputmode="numeric" min="1" value="20" placeholder="เช่น 20" />
+    </div>
+
+    <div class="field">
+      <label>จำนวนต้นต่อขวด</label>
+      <input type="number" id="plants-per-bottle" inputmode="numeric" min="1" placeholder="เช่น 1" />
+      <p class="muted" id="quantity-preview" style="margin-top:6px;"></p>
     </div>
 
     <div class="field">
@@ -139,6 +145,16 @@ document.querySelectorAll("#media-type-grid .chip").forEach(chip => {
   });
 });
 
+// ---------- preview จำนวนต้นรวม (ขวด x ต้นต่อขวด) — แค่โชว์ ค่าจริงคำนวณที่ backend ----------
+function updateQuantityPreview() {
+  const bottleCount = Number(document.getElementById("bottle-count").value);
+  const perBottle = Number(document.getElementById("plants-per-bottle").value);
+  const preview = document.getElementById("quantity-preview");
+  preview.textContent = (bottleCount > 0 && perBottle > 0) ? `= ${bottleCount * perBottle} ต้น` : "";
+}
+document.getElementById("bottle-count").addEventListener("input", updateQuantityPreview);
+document.getElementById("plants-per-bottle").addEventListener("input", updateQuantityPreview);
+
 // ---------- เลือกล็อตใหม่ / ล็อตที่มีอยู่ ----------
 document.querySelectorAll("#lot-mode-grid .chip").forEach(chip => {
   chip.addEventListener("click", () => {
@@ -219,13 +235,15 @@ document.getElementById("plant-select").addEventListener("change", () => {
 
 document.getElementById("save-btn").addEventListener("click", async () => {
   const plant_id = document.getElementById("plant-select").value;
-  const quantity = document.getElementById("quantity").value;
+  const bottleCount = document.getElementById("bottle-count").value;
+  const plantsPerBottle = document.getElementById("plants-per-bottle").value;
   const bottle_no = document.getElementById("bottle-no").value.trim();
   const lot_no = lotMode === "new" ? document.getElementById("lot-no-input").value.trim() : selectedLotNo;
 
   if (!plant_id) return alert("กรุณาเลือกชนิดพืช");
   if (!lot_no) return alert(lotMode === "new" ? "กรุณาพิมพ์หมายเลขล็อต" : "กรุณาเลือกล็อตที่มีอยู่");
-  if (!quantity || Number(quantity) <= 0) return alert("กรุณาใส่จำนวนต้นที่ทำได้");
+  if (!bottleCount || Number(bottleCount) <= 0) return alert("กรุณาใส่จำนวนขวดที่ทำได้");
+  if (!plantsPerBottle || Number(plantsPerBottle) <= 0) return alert("กรุณาใส่จำนวนต้นต่อขวด");
   if (!selectedMedia) return alert("กรุณาเลือกประเภทรอบนี้ (TIB หรือ SS)");
   if (selectedMedia === "TIB" && !bottle_no) return alert("กรุณาใส่หมายเลขขวด (จำเป็นสำหรับ TIB)");
   if (!selectedShelf) return alert("กรุณาเลือกชั้นเก็บ");
@@ -237,7 +255,8 @@ document.getElementById("save-btn").addEventListener("click", async () => {
     const result = await TissueApp.call("recordTransfer", {
       plant_id,
       lot_no,
-      quantity: Number(quantity),
+      bottle_count: Number(bottleCount),
+      plants_per_bottle: Number(plantsPerBottle),
       media_type: selectedMedia,
       bottle_no: selectedMedia === "TIB" ? bottle_no : "",
       shelf: selectedShelf,
@@ -268,7 +287,9 @@ document.getElementById("record-next-btn").addEventListener("click", () => {
   document.getElementById("form-wrap").classList.remove("hidden");
   document.getElementById("after-actions").classList.add("hidden");
   document.getElementById("result-banner").classList.add("hidden");
-  document.getElementById("quantity").value = "20";
+  document.getElementById("bottle-count").value = "20";
+  document.getElementById("plants-per-bottle").value = "";
+  document.getElementById("quantity-preview").textContent = "";
   document.getElementById("bottle-no").value = "";
   document.getElementById("bottle-no-field").classList.add("hidden");
   document.getElementById("lot-no-input").value = "";

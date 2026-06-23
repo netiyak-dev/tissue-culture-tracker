@@ -73,6 +73,15 @@
       <label>สูตรอาหาร — แบบ SS (กึ่งแข็ง)</label>
       <input type="text" id="f-stage1-recipe-ss" placeholder="เช่น MS + BA 1mg/L (วุ้น)" />
     </div>
+    <div class="field">
+      <label>ตัวคูณการขยาย — แบบ TIB (ไม่บังคับ)</label>
+      <input type="number" id="f-stage1-multiplier-tib" placeholder="เช่น 3 (ไม่กรอก = ไม่มีตัวคูณ)" min="0" step="0.1" />
+    </div>
+    <div class="field">
+      <label>ตัวคูณการขยาย — แบบ SS (ไม่บังคับ)</label>
+      <input type="number" id="f-stage1-multiplier-ss" placeholder="เช่น 3 (ไม่กรอก = ไม่มีตัวคูณ)" min="0" step="0.1" />
+      <p class="muted" style="margin-top:6px;">ใช้พยากรณ์จำนวนต้นในอนาคตที่หน้าสรุปข้อมูล — ไม่กรอกก็ใช้งานได้ตามปกติ แค่ไม่มีการพยากรณ์การเติบโตให้ระยะนี้</p>
+    </div>
 
     <h3 style="margin-top:20px;">ระยะกระตุ้นราก (รอบเดียวเสมอ)</h3>
     <div class="field">
@@ -168,6 +177,8 @@ function openPlantForm(p) {
   document.getElementById("f-stage1-days").value = p ? p.stage1_days : "";
   document.getElementById("f-stage1-recipe-tib").value = p ? p.stage1_recipe_tib : "";
   document.getElementById("f-stage1-recipe-ss").value = p ? p.stage1_recipe_ss : "";
+  document.getElementById("f-stage1-multiplier-tib").value = p ? p.stage1_multiplier_tib : "";
+  document.getElementById("f-stage1-multiplier-ss").value = p ? p.stage1_multiplier_ss : "";
   document.getElementById("f-stage2-days").value = p ? p.stage2_days : "";
   document.getElementById("f-stage2-recipe-tib").value = p ? p.stage2_recipe_tib : "";
   document.getElementById("f-stage2-recipe-ss").value = p ? p.stage2_recipe_ss : "";
@@ -189,6 +200,8 @@ document.getElementById("save-plant-btn").addEventListener("click", async () => 
     stage1_days: Number(document.getElementById("f-stage1-days").value),
     stage1_recipe_tib: document.getElementById("f-stage1-recipe-tib").value.trim(),
     stage1_recipe_ss: document.getElementById("f-stage1-recipe-ss").value.trim(),
+    stage1_multiplier_tib: document.getElementById("f-stage1-multiplier-tib").value.trim(),
+    stage1_multiplier_ss: document.getElementById("f-stage1-multiplier-ss").value.trim(),
     stage2_days: Number(document.getElementById("f-stage2-days").value),
     stage2_recipe_tib: document.getElementById("f-stage2-recipe-tib").value.trim(),
     stage2_recipe_ss: document.getElementById("f-stage2-recipe-ss").value.trim(),

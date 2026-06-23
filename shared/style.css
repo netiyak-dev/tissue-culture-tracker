@@ -173,6 +173,7 @@ p { line-height: 1.6; margin: 0 0 var(--space-3) 0; }
 }
 .field input[type="text"],
 .field input[type="number"],
+.field input[type="date"],
 .field select,
 .field textarea {
   width: 100%;

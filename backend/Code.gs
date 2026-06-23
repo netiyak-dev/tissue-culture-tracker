@@ -33,6 +33,7 @@ const SHEET_SCHEMAS = {
   PlantTypes: [
     "plant_id", "plant_name",
     "stage1_rounds", "stage1_days", "stage1_recipe_tib", "stage1_recipe_ss",
+    "stage1_multiplier_tib", "stage1_multiplier_ss",
     "stage2_days", "stage2_recipe_tib", "stage2_recipe_ss",
     "stage3_recipe_tib", "stage3_recipe_ss",
     "active",
@@ -40,6 +41,7 @@ const SHEET_SCHEMAS = {
   Storage: ["type", "value", "active"],
   Transfers: [
     "record_id", "plant_id", "plant_name", "lot_no", "lab", "round_no", "transfer_date", "quantity",
+    "bottle_count", "plants_per_bottle",
     "media_type", "bottle_no", "shelf", "sub_shelf",
     "stage", "recipe_used", "next_transfer_date", "recorded_by", "created_at",
   ],
@@ -340,6 +342,12 @@ function savePlantType(payload) {
   required.forEach(f => {
     if (payload[f] === undefined || payload[f] === "") throw new Error("กรุณากรอกข้อมูลให้ครบ: " + f);
   });
+  // ตัวคูณการขยายไม่บังคับ แต่ถ้ากรอกมาต้องเป็นเลข >= 0 (ปล่อยว่างได้ = ไม่มีตัวคูณ)
+  ["stage1_multiplier_tib", "stage1_multiplier_ss"].forEach(f => {
+    if (payload[f] !== undefined && payload[f] !== "" && (isNaN(Number(payload[f])) || Number(payload[f]) < 0)) {
+      throw new Error("ตัวคูณการขยายต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0: " + f);
+    }
+  });
   const plants = getSheetData("PlantTypes");
   if (payload.plant_id) {
     const existing = plants.find(p => p.plant_id === payload.plant_id);
@@ -401,10 +409,13 @@ function deactivateStorageValue(payload) {
 // Handler หลัก: บันทึกการถ่ายโอนเนื้อเยื่อ + คำนวณระยะ/สูตร/วันถัดไปอัตโนมัติ
 // ===================================================================
 function recordTransfer(payload) {
-  const required = ["plant_id", "lot_no", "quantity", "shelf", "sub_shelf", "media_type"];
+  const required = ["plant_id", "lot_no", "bottle_count", "plants_per_bottle", "shelf", "sub_shelf", "media_type"];
   required.forEach(f => {
     if (payload[f] === undefined || payload[f] === "") throw new Error("กรุณากรอกข้อมูลให้ครบ: " + f);
   });
+  if (Number(payload.bottle_count) <= 0 || Number(payload.plants_per_bottle) <= 0) {
+    throw new Error("จำนวนขวดและจำนวนต้นต่อขวดต้องมากกว่า 0");
+  }
   if (MEDIA_TYPES.indexOf(payload.media_type) === -1) {
     throw new Error("ประเภทรอบต้องเป็น TIB หรือ SS");
   }
@@ -460,6 +471,10 @@ function recordTransfer(payload) {
     round_in_stage = "-";
   }
 
+  const bottle_count = Number(payload.bottle_count);
+  const plants_per_bottle = Number(payload.plants_per_bottle);
+  const quantity = bottle_count * plants_per_bottle;
+
   const record = {
     record_id: genId("rec"),
     plant_id: plant.plant_id,
@@ -468,7 +483,9 @@ function recordTransfer(payload) {
     lab: me.lab,
     round_no,
     transfer_date: formatThaiDate(today),
-    quantity: payload.quantity,
+    quantity,
+    bottle_count,
+    plants_per_bottle,
     media_type: payload.media_type,
     bottle_no: isTib ? payload.bottle_no : "",
     shelf: payload.shelf,
@@ -530,7 +547,7 @@ function notifyAfterRecord(record, round_in_stage, recorderLineUserId) {
  * แยกออกมาเป็นฟังก์ชันกลาง เพื่อให้ getDashboard() (ต่อ Lab ของผู้ใช้) และ sendDueReminders()
  * (ต้องคำนวณทีละ Lab + รวมทุก Lab สำหรับแอดมิน) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
  */
-function computeDashboardData(transfers, plants, storage) {
+function computeDashboardData(transfers, plants, storage, targetDate) {
   // นับ "ล็อต" ที่กำลังติดตามอยู่ ไม่ใช่ตำแหน่งเก็บ — แถวเก่าที่ไม่มี lot_no/lab (ก่อนอัปเดตฟีเจอร์นี้) ถูกข้าม
   const latestByLot = {};
   transfers.forEach(t => {
@@ -580,7 +597,12 @@ function computeDashboardData(transfers, plants, storage) {
     const stage_counts = { "ขยาย": 0, "กระตุ้นราก": 0, "พร้อมออกปลูก": 0 };
     lots.forEach(t => { stage_counts[t.stage] = (stage_counts[t.stage] || 0) + Number(t.quantity || 0); });
     const dominant_stage = Object.keys(stage_counts).reduce((a, b) => stage_counts[a] >= stage_counts[b] ? a : b, "ขยาย");
-    return { plant_name: p.plant_name, total: lots.length, stage_counts, dominant_stage };
+    const result = { plant_name: p.plant_name, total: lots.length, stage_counts, dominant_stage };
+    if (targetDate) {
+      const predicted = lots.reduce((sum, t) => sum + predictQuantityForLot(t, p, targetDate), 0);
+      result.predicted_total = Math.round(predicted);
+    }
+    return result;
   });
 
   const shelves = storage.filter(s => s.type === "shelf").map(s => s.value);
@@ -606,7 +628,8 @@ function getDashboard(payload) {
   const transfers = getSheetData("Transfers").filter(t => t.lab && (viewLab ? t.lab === viewLab : me.isAdmin));
   const plants = getSheetData("PlantTypes");
   const storage = getSheetData("Storage").filter(s => s.active !== false);
-  const data = computeDashboardData(transfers, plants, storage);
+  const targetDate = payload.target_date ? new Date(payload.target_date) : null;
+  const data = computeDashboardData(transfers, plants, storage, targetDate);
   const members = getSheetData("LineUsers")
     .filter(u => u.active !== false && (viewLab ? u.lab === viewLab : true))
     .map(u => ({ display_name: u.display_name, role: u.role || "user", lab: u.lab || "" }));
@@ -696,6 +719,45 @@ function getLotHistory(payload) {
     next_transfer_date: t.next_transfer_date,
     recorded_by: t.recorded_by,
   }));
+}
+
+/**
+ * พยากรณ์จำนวนต้นของล็อตหนึ่ง ณ วันที่ targetDate ที่ต้องการ
+ * จำลองล่วงหน้าทีละรอบโดยใช้ stage1_days/stage2_days ของชนิดพืชเพื่อรู้ว่ารอบถัดไปจะเกิดวันไหน
+ * คูณด้วยตัวคูณการขยาย (เฉพาะตอนยังอยู่ระยะ "ขยาย") ทุกรอบที่เกิดขึ้นจริงก่อนหรือเท่ากับ targetDate
+ * เมื่อเลยระยะขยายไปแล้ว (กระตุ้นราก/พร้อมออกปลูก) ไม่มีการคูณอีก ใช้เวลาเฉยๆ จนจบการจำลอง
+ */
+function predictQuantityForLot(lot, plant, targetDate) {
+  let quantity = Number(lot.quantity || 0);
+  let roundNo = Number(lot.round_no || 0);
+  let nextDate = lot.next_transfer_date ? parseThaiDateApprox(lot.next_transfer_date) : null;
+  if (!nextDate) return quantity; // ล็อตที่จบรอบติดตามไปแล้ว ไม่มีรอบเพิ่มอีก
+
+  const stage1Rounds = Number(plant.stage1_rounds) || 1;
+  const stage1Days = Number(plant.stage1_days) || 0;
+  const stage2Days = Number(plant.stage2_days) || 0;
+  const isTib = lot.media_type === "TIB";
+  // ค่าตัวคูณในชีตเป็น "" (ไม่ใช่ undefined) ตอนยังไม่กรอก — ต้อง || 1 ก่อน Number() ไม่งั้น Number("") จะได้ 0 ทำให้คูณทุกอย่างเป็น 0
+  const multiplier = Number((isTib ? plant.stage1_multiplier_tib : plant.stage1_multiplier_ss) || 1) || 1;
+
+  let safety = 0; // กันลูปไม่จบถ้า stage1_days/stage2_days ถูกตั้งเป็น 0 โดยไม่ตั้งใจ
+  while (nextDate && nextDate <= targetDate && safety < 1000) {
+    safety++;
+    roundNo++;
+    if (roundNo <= stage1Rounds) {
+      quantity = quantity * multiplier;
+      if (stage1Days <= 0) break;
+      const d = new Date(nextDate); d.setDate(d.getDate() + stage1Days);
+      nextDate = d;
+    } else if (roundNo === stage1Rounds + 1) {
+      if (stage2Days <= 0) { nextDate = null; break; }
+      const d = new Date(nextDate); d.setDate(d.getDate() + stage2Days);
+      nextDate = d;
+    } else {
+      nextDate = null; // เข้าระยะพร้อมออกปลูก ไม่มีรอบถัดไปอีก หยุดจำลอง
+    }
+  }
+  return quantity;
 }
 
 function nextRecipeFor(plants, transferRow) {

@@ -46,6 +46,10 @@
       </div>
 
       <h2>ภาพรวมตามชนิดพืช</h2>
+      <div class="field" style="margin-bottom:12px;">
+        <label>วันที่อยากได้เนื้อเยื่อ (ไม่บังคับ)</label>
+        <input type="date" id="target-date-input" />
+      </div>
       <div id="plant-overview"></div>
     </div>
   </div>
@@ -54,6 +58,13 @@
 
 <script src="../liff-app/js/api.js"></script>
 <script>
+function formatThaiDateClient(isoDateStr) {
+  const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  const d = new Date(isoDateStr + "T00:00:00");
+  const buddhistYear = d.getFullYear() + 543;
+  return `${d.getDate()} ${months[d.getMonth()]} ${String(buddhistYear).slice(-2)}`;
+}
+
 function stageStepper(stage) {
   const stages = ["ขยาย", "กระตุ้นราก", "พร้อมออกปลูก"];
   const currentIdx = stages.indexOf(stage);
@@ -119,7 +130,11 @@ function renderMembers(data) {
 
 async function loadDashboard(viewLab) {
   try {
-    const data = await TissueApp.call("getDashboard", viewLab ? { view_lab: viewLab } : {});
+    const targetDateVal = document.getElementById("target-date-input").value;
+    const payload = {};
+    if (viewLab) payload.view_lab = viewLab;
+    if (targetDateVal) payload.target_date = targetDateVal;
+    const data = await TissueApp.call("getDashboard", payload);
 
     const badge = document.getElementById("lab-badge");
     badge.textContent = data.lab ? "Lab " + data.lab : "ทุก Lab";
@@ -160,6 +175,7 @@ async function loadDashboard(viewLab) {
         <h3>${p.plant_name} <span class="muted">· ${p.total} ล็อต</span></h3>
         ${stageStepper(p.dominant_stage)}
         <div class="muted">ขยาย ${p.stage_counts.ขยาย} ต้น · กระตุ้นราก ${p.stage_counts.กระตุ้นราก} ต้น · พร้อมออกปลูก ${p.stage_counts.พร้อมออกปลูก} ต้น</div>
+        ${p.predicted_total !== undefined ? `<div class="muted" style="margin-top:6px;color:var(--forest);font-weight:600;">พยากรณ์ ณ ${formatThaiDateClient(targetDateVal)}: ${p.predicted_total} ต้น</div>` : ""}
       </div>
     `).join("") || '<p class="muted">ยังไม่มีข้อมูล</p>';
 
@@ -176,6 +192,11 @@ async function loadDashboard(viewLab) {
     document.getElementById("due-list").innerHTML = `<p class="muted">โหลดข้อมูลไม่สำเร็จ: ${err.message}</p>`;
   }
 }
+
+document.getElementById("target-date-input").addEventListener("change", () => {
+  const activeChip = document.querySelector("#lab-filter .chip.active");
+  loadDashboard(activeChip ? (activeChip.textContent === "ทุก Lab" ? "" : activeChip.textContent) : undefined);
+});
 
 (async () => {
   await TissueApp.init();
