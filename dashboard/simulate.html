@@ -70,13 +70,13 @@
     <input type="number" id="tib-multiplier" min="0" step="0.1" value="20" />
   </div>
 
-  <h2 style="margin-top:20px;">อัตรารอด</h2>
+  <h2 style="margin-top:20px;">อัตรานำไปกระตุ้นราก / อัตรารอด</h2>
   <div class="field">
-    <label>อัตรารอดระยะกระตุ้นราก (%)</label>
+    <label>อัตรานำไปกระตุ้นราก (%) — สัดส่วนของรอบนี้ที่หยิบออกจากวงจรขยายไปกระตุ้นราก</label>
     <input type="number" id="rooting-rate" min="0" max="100" value="100" />
   </div>
   <div class="field">
-    <label>อัตรารอดระยะปรับสภาพ (%)</label>
+    <label>อัตรารอดหลังออกปลูก (%) — สัดส่วนของที่หยิบออกไปแล้วที่รอดจริงจนเป็นต้นพร้อมส่งมอบ</label>
     <input type="number" id="acclimatization-rate" min="0" max="100" value="100" />
   </div>
 
@@ -107,6 +107,7 @@ const TABLE_COLUMNS = [
   ["tib_output_pieces", "ผลผลิต TIB"],
   ["leftover_pieces", "เหลือค้าง"],
   ["total_pieces_after_cycle", "รวมปลายรอบ"],
+  ["sent_to_rooting_pieces", "นำไปกระตุ้นราก (รอบนี้)"],
   ["ready_for_planting_pieces", "พร้อมออกปลูก (รอบนี้)"],
   ["ready_for_planting_cumulative", "พร้อมออกปลูกสะสม"],
 ];
@@ -186,7 +187,7 @@ function renderResult(result) {
   const table = document.getElementById("result-table");
   const headRow = "<tr>" + TABLE_COLUMNS.map(([, label]) => `<th>${label}</th>`).join("") + "</tr>";
   const bodyRows = result.rows.map(row =>
-    "<tr>" + TABLE_COLUMNS.map(([key]) => `<td>${row[key]}</td>`).join("") + "</tr>"
+    "<tr>" + TABLE_COLUMNS.map(([key]) => `<td>${row[key] !== undefined ? row[key] : "-"}</td>`).join("") + "</tr>"
   ).join("");
   table.innerHTML = headRow + bodyRows;
 }

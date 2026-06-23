@@ -825,10 +825,13 @@ function saveSystemSettings(payload) {
 /**
  * จำลองการผลิตเนื้อเยื่อพืชแบบรอบการผลิต (ทุก cycleDays วัน) จนถึง targetDate หรือจนกว่ายอดสะสม "พร้อมออกปลูก" จะถึง targetPlants
  * แต่ละรอบ: แบ่งจำนวนชิ้นตั้งต้นเข้าระบบ SS/TIB ตามสัดส่วนความจุของแต่ละระบบ ส่วนที่เกินความจุรวมเก็บเป็น "เหลือค้าง" (ไม่คูณ)
- * ส่วนที่โหลดเข้าได้คูณด้วยตัวคูณของระบบนั้น รวมเป็นจำนวนชิ้นปลายรอบ — จากนั้นหักส่วนที่ "พร้อมออกปลูก" (= ปลายรอบ × rootingRate × acclimatizationRate)
- * ออกจริง สะสมยอดนี้ไว้เทียบกับ targetPlants ส่วนที่เหลือ (ไม่ใช่ทั้งหมด) เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบถัดไป
+ * ส่วนที่โหลดเข้าได้คูณด้วยตัวคูณของระบบนั้น รวมเป็นจำนวนชิ้นปลายรอบ — จากนั้น:
+ *   1. หยิบส่วนที่ "นำไปกระตุ้นราก" ออกจากวงจรขยายจริงตาม rootingRate (= ปลายรอบ × rootingRate) ส่วนนี้ไม่วนกลับมาขยายต่ออีกไม่ว่าจะรอดหรือไม่
+ *   2. ของที่หยิบออกไปนั้น มีแค่ acclimatizationRate ที่รอดจนเป็นต้นพร้อมส่งมอบจริง ("พร้อมออกปลูก" ของรอบนี้) ส่วนที่ไม่รอดถือว่าสูญไปเลย
+ *   3. ส่วนที่เหลือ (ปลายรอบ − ที่หยิบออกไปกระตุ้นราก) เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบถัดไป
+ * สะสมยอด "พร้อมออกปลูก" ของทุกรอบไว้เทียบกับ targetPlants
  * แยกเป็นฟังก์ชันกลาง (รับค่าที่ parse แล้วเท่านั้น ไม่แตะ payload ตรงๆ) เพื่อให้ simulateProduction() (หน้าจำลอง standalone)
- * และ computeDashboardData() (พยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard, ตั้งอัตรารอด = 0 เพื่อไม่หักอะไรออก ขยายทบต้นล้วนๆ) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
+ * และ computeDashboardData() (พยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard, ตั้ง rootingRate = 0 เพื่อไม่หยิบอะไรออก ขยายทบต้นล้วนๆ) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
  */
 function runProductionCycles(params) {
   const {
@@ -868,9 +871,11 @@ function runProductionCycles(params) {
     const leftover = inputPieces - ssLoaded - tibLoaded;
     const grossOutput = ssOutput + tibOutput;
     const totalAfterCycle = leftover + grossOutput;
-    // ส่วนที่ "พร้อมออกปลูก" ของรอบนี้ถูกหักออกจากวงจรขยายจริง — เหลือแค่ carriedForward เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบหน้า
-    const readyForPlanting = totalAfterCycle * rootingRate * acclimatizationRate;
-    const carriedForward = totalAfterCycle - readyForPlanting;
+    // rootingRate = อัตรา "นำไปกระตุ้นราก" คือสัดส่วนของรอบนี้ที่ถูกหยิบออกจากวงจรขยายไปเข้าระยะกระตุ้นราก (ออกจากลูปเลย ไม่ว่าจะรอดหรือไม่)
+    // acclimatizationRate = อัตรา "รอดหลังออกปลูก" คือสัดส่วนของที่ถูกหยิบออกไปแล้วที่รอดจริงจนเป็นต้นพร้อมส่งมอบ (ส่วนที่ไม่รอดถือว่าสูญไปเลย ไม่กลับเข้าลูป)
+    const sentToRooting = totalAfterCycle * rootingRate;
+    const carriedForward = totalAfterCycle - sentToRooting;
+    const readyForPlanting = sentToRooting * acclimatizationRate;
     cumulativeReady += readyForPlanting;
 
     rows.push({
@@ -890,6 +895,7 @@ function runProductionCycles(params) {
       leftover_pieces: Math.round(leftover),
       gross_output_pieces: Math.round(grossOutput),
       total_pieces_after_cycle: Math.round(totalAfterCycle),
+      sent_to_rooting_pieces: Math.round(sentToRooting),
       ready_for_planting_pieces: Math.round(readyForPlanting),
       ready_for_planting_cumulative: Math.round(cumulativeReady),
     });
