@@ -230,6 +230,7 @@ function doPost(e) {
       getDashboard,
       listActiveLots,
       getLotHistory,
+      simulateProduction,
     };
     if (!handlers[action]) throw new Error("ไม่รู้จัก action: " + action);
     const result = handlers[action](payload);
@@ -719,6 +720,113 @@ function getLotHistory(payload) {
     next_transfer_date: t.next_transfer_date,
     recorded_by: t.recorded_by,
   }));
+}
+
+// ===================================================================
+// Handler: จำลองรอบการผลิต (เครื่องมือวางแผนกำลังผลิตล่วงหน้า — ไม่อ่าน/เขียน Transfers แยกอิสระจากข้อมูลล็อตจริง)
+// ===================================================================
+
+/**
+ * จำลองการผลิตเนื้อเยื่อพืชแบบรอบการผลิต (ทุก cycle_days วัน) จนถึง target_date หรือจนกว่าจะถึง target_plants
+ * แต่ละรอบ: แบ่งจำนวนชิ้นตั้งต้นเข้าระบบ SS/TIB ตามสัดส่วนความจุของแต่ละระบบ ส่วนที่เกินความจุรวมเก็บเป็น "เหลือค้าง" (ไม่คูณ)
+ * ส่วนที่โหลดเข้าได้คูณด้วยตัวคูณของระบบนั้น แล้วรวมเป็นจำนวนชิ้นตั้งต้นของรอบถัดไป
+ */
+function simulateProduction(payload) {
+  if (!payload.initial_pieces || Number(payload.initial_pieces) <= 0) {
+    throw new Error("กรุณาใส่จำนวนชิ้นตั้งต้น");
+  }
+  const targetDate = payload.target_date ? new Date(payload.target_date) : null;
+  const targetPlants = (payload.target_plants !== undefined && payload.target_plants !== "")
+    ? Number(payload.target_plants) : null;
+  if (!targetDate && targetPlants === null) {
+    throw new Error("กรุณาระบุวันที่ต้องการเนื้อเยื่อหรือจำนวนต้นเป้าหมายอย่างน้อยหนึ่งอย่าง");
+  }
+
+  const startDate = payload.start_date ? new Date(payload.start_date) : new Date();
+  const cycleDays = Number(payload.cycle_days) || 15;
+
+  const ssBottleLimit = Number(payload.ss_bottle_limit) || 2000;
+  const ssPiecesPerBottle = Number(payload.ss_pieces_per_bottle) || 8;
+  const ssMultiplier = Number(payload.ss_multiplication_factor) || 5;
+  const tibBottleLimit = Number(payload.tib_bottle_limit) || 200;
+  const tibPiecesPerBottle = Number(payload.tib_pieces_per_bottle) || 20;
+  const tibMultiplier = Number(payload.tib_multiplication_factor) || 20;
+  const rootingRate = (payload.rooting_rate !== undefined && payload.rooting_rate !== "") ? Number(payload.rooting_rate) : 1;
+  const acclimatizationRate = (payload.acclimatization_rate !== undefined && payload.acclimatization_rate !== "") ? Number(payload.acclimatization_rate) : 1;
+
+  const ssCapacity = ssBottleLimit * ssPiecesPerBottle;
+  const tibCapacity = tibBottleLimit * tibPiecesPerBottle;
+  const combinedCapacity = ssCapacity + tibCapacity;
+  // แบ่งจำนวนชิ้นตั้งต้นเข้า SS/TIB ตามสัดส่วนความจุของแต่ละระบบ (ไม่ใช่เติมระบบใดระบบหนึ่งให้เต็มก่อน)
+  const ssShareRatio = combinedCapacity > 0 ? ssCapacity / combinedCapacity : 0;
+  const tibShareRatio = combinedCapacity > 0 ? tibCapacity / combinedCapacity : 0;
+
+  const rows = [];
+  let inputPieces = Number(payload.initial_pieces);
+  let cycleDate = new Date(startDate);
+  let cycle = 0;
+  let reachedAt = null;
+  const MAX_CYCLES = 500; // กันลูปไม่จบ (500 รอบ x 15 วัน ~ 20 ปี เกินพอสำหรับการวางแผนจริง)
+
+  while (cycle < MAX_CYCLES) {
+    if (targetDate && cycleDate > targetDate) break;
+    cycle++;
+
+    const ssShare = inputPieces * ssShareRatio;
+    const tibShare = inputPieces * tibShareRatio;
+    const ssLoaded = Math.min(ssShare, ssCapacity);
+    const tibLoaded = Math.min(tibShare, tibCapacity);
+    const ssBottlesUsed = ssPiecesPerBottle > 0 ? Math.ceil(ssLoaded / ssPiecesPerBottle) : 0;
+    const tibBottlesUsed = tibPiecesPerBottle > 0 ? Math.ceil(tibLoaded / tibPiecesPerBottle) : 0;
+    const ssOutput = ssLoaded * ssMultiplier;
+    const tibOutput = tibLoaded * tibMultiplier;
+    const leftover = inputPieces - ssLoaded - tibLoaded;
+    const grossOutput = ssOutput + tibOutput;
+    const totalAfterCycle = leftover + grossOutput;
+    const estimatedDeliverable = totalAfterCycle * rootingRate * acclimatizationRate;
+
+    rows.push({
+      cycle,
+      date: formatThaiDate(cycleDate),
+      input_pieces: Math.round(inputPieces),
+      ss_capacity: ssCapacity,
+      ss_bottles: ssBottlesUsed,
+      ss_loaded_pieces: Math.round(ssLoaded),
+      ss_multiplication_factor: ssMultiplier,
+      ss_output_pieces: Math.round(ssOutput),
+      tib_capacity: tibCapacity,
+      tib_bottles: tibBottlesUsed,
+      tib_loaded_pieces: Math.round(tibLoaded),
+      tib_multiplication_factor: tibMultiplier,
+      tib_output_pieces: Math.round(tibOutput),
+      leftover_pieces: Math.round(leftover),
+      gross_output_pieces: Math.round(grossOutput),
+      total_pieces_after_cycle: Math.round(totalAfterCycle),
+      estimated_deliverable_plants: Math.round(estimatedDeliverable),
+    });
+
+    if (!reachedAt && targetPlants !== null && estimatedDeliverable >= targetPlants) {
+      reachedAt = { cycle, date: formatThaiDate(cycleDate) };
+    }
+
+    inputPieces = totalAfterCycle;
+    const next = new Date(cycleDate); next.setDate(next.getDate() + cycleDays);
+    cycleDate = next;
+
+    if (reachedAt) break; // ถึงเป้าหมายแล้ว ไม่ต้องจำลองรอบถัดไปอีก
+  }
+
+  const lastRow = rows[rows.length - 1] || null;
+  const summary = {
+    total_cycles: rows.length,
+    reached_target: targetPlants !== null ? !!reachedAt : null,
+    reached_cycle: reachedAt ? reachedAt.cycle : null,
+    reached_date: reachedAt ? reachedAt.date : null,
+    shortfall: (targetPlants !== null && !reachedAt && lastRow)
+      ? Math.max(0, Math.round(targetPlants - lastRow.estimated_deliverable_plants)) : null,
+  };
+
+  return { rows, summary };
 }
 
 /**

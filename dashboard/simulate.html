@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>จำลองรอบการผลิต — เพาะเลี้ยงเนื้อเยื่อ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/style.css" />
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+<div class="screen" style="max-width:720px;">
+
+  <div class="topbar">
+    <a href="index.html" class="back-btn">‹</a>
+    <h1>จำลองรอบการผลิต</h1>
+  </div>
+  <p class="muted">คำนวณว่าจะได้กี่ต้นภายในวันที่ต้องการ หรือต้องใช้กี่รอบถึงจะถึงจำนวนที่ต้องการ — เป็นเครื่องมือวางแผนล่วงหน้า ไม่เกี่ยวกับข้อมูลล็อตจริงในระบบ</p>
+
+  <h2 style="margin-top:20px;">ข้อมูลตั้งต้น</h2>
+  <div class="field">
+    <label>วันที่เริ่ม</label>
+    <input type="date" id="start-date" />
+  </div>
+  <div class="field">
+    <label>จำนวนชิ้นตั้งต้น</label>
+    <input type="number" id="initial-pieces" min="1" placeholder="เช่น 1000" />
+  </div>
+  <div class="field">
+    <label>วันที่ต้องการเนื้อเยื่อ (ไม่บังคับ)</label>
+    <input type="date" id="target-date" />
+  </div>
+  <div class="field" style="margin-bottom:6px;">
+    <label>จำนวนต้นเป้าหมาย (ไม่บังคับ)</label>
+    <input type="number" id="target-plants" min="1" placeholder="เช่น 5000" />
+  </div>
+  <p class="muted" style="margin-bottom:20px;">กรอกอย่างน้อย 1 ใน 2 อย่างด้านบน (วันที่ต้องการเนื้อเยื่อ หรือจำนวนต้นเป้าหมาย)</p>
+
+  <div class="field">
+    <label>จำนวนวันต่อรอบ</label>
+    <input type="number" id="cycle-days" min="1" value="15" />
+  </div>
+
+  <h2 style="margin-top:20px;">ระบบ SS (กึ่งแข็ง)</h2>
+  <div class="field">
+    <label>ขวดสูงสุด</label>
+    <input type="number" id="ss-bottle-limit" min="0" value="2000" />
+  </div>
+  <div class="field">
+    <label>ชิ้นต่อขวด</label>
+    <input type="number" id="ss-pieces-per-bottle" min="1" value="8" />
+  </div>
+  <div class="field">
+    <label>ตัวคูณต่อรอบ — จำนวนชิ้นใหม่ที่ได้จากชิ้นเดิม</label>
+    <input type="number" id="ss-multiplier" min="0" step="0.1" value="5" />
+  </div>
+
+  <h2 style="margin-top:20px;">ระบบ TIB (อาหารเหลว)</h2>
+  <div class="field">
+    <label>ขวดสูงสุด</label>
+    <input type="number" id="tib-bottle-limit" min="0" value="200" />
+  </div>
+  <div class="field">
+    <label>ชิ้นต่อขวด</label>
+    <input type="number" id="tib-pieces-per-bottle" min="1" value="20" />
+  </div>
+  <div class="field">
+    <label>ตัวคูณต่อรอบ — จำนวนชิ้นใหม่ที่ได้จากชิ้นเดิม</label>
+    <input type="number" id="tib-multiplier" min="0" step="0.1" value="20" />
+  </div>
+
+  <h2 style="margin-top:20px;">อัตรารอด</h2>
+  <div class="field">
+    <label>อัตรารอดระยะกระตุ้นราก (%)</label>
+    <input type="number" id="rooting-rate" min="0" max="100" value="100" />
+  </div>
+  <div class="field">
+    <label>อัตรารอดระยะปรับสภาพ (%)</label>
+    <input type="number" id="acclimatization-rate" min="0" max="100" value="100" />
+  </div>
+
+  <button id="simulate-btn" class="btn btn-primary btn-block">จำลอง</button>
+
+  <div id="result-section" class="hidden">
+    <div id="summary-card" class="card" style="margin-top:20px;"></div>
+
+    <h2 style="margin-top:20px;">ตารางรายรอบ</h2>
+    <div class="sim-table-wrap">
+      <table class="sim-table" id="result-table"></table>
+    </div>
+  </div>
+
+</div>
+
+<script src="../liff-app/js/api.js"></script>
+<script>
+const TABLE_COLUMNS = [
+  ["cycle", "รอบที่"],
+  ["date", "วันที่"],
+  ["input_pieces", "ชิ้นตั้งต้น"],
+  ["ss_bottles", "ขวด SS"],
+  ["ss_loaded_pieces", "ชิ้นเข้า SS"],
+  ["ss_output_pieces", "ผลผลิต SS"],
+  ["tib_bottles", "ขวด TIB"],
+  ["tib_loaded_pieces", "ชิ้นเข้า TIB"],
+  ["tib_output_pieces", "ผลผลิต TIB"],
+  ["leftover_pieces", "เหลือค้าง"],
+  ["total_pieces_after_cycle", "รวมปลายรอบ"],
+  ["estimated_deliverable_plants", "ต้นที่ส่งมอบได้"],
+];
+
+document.getElementById("start-date").valueAsDate = new Date();
+
+document.getElementById("simulate-btn").addEventListener("click", async () => {
+  const initialPieces = document.getElementById("initial-pieces").value;
+  const targetDate = document.getElementById("target-date").value;
+  const targetPlants = document.getElementById("target-plants").value;
+
+  if (!initialPieces || Number(initialPieces) <= 0) return alert("กรุณาใส่จำนวนชิ้นตั้งต้น");
+  if (!targetDate && !targetPlants) return alert("กรุณากรอกวันที่ต้องการเนื้อเยื่อ หรือจำนวนต้นเป้าหมาย อย่างน้อยหนึ่งอย่าง");
+
+  const payload = {
+    start_date: document.getElementById("start-date").value,
+    initial_pieces: Number(initialPieces),
+    cycle_days: Number(document.getElementById("cycle-days").value) || 15,
+    ss_bottle_limit: Number(document.getElementById("ss-bottle-limit").value),
+    ss_pieces_per_bottle: Number(document.getElementById("ss-pieces-per-bottle").value),
+    ss_multiplication_factor: Number(document.getElementById("ss-multiplier").value),
+    tib_bottle_limit: Number(document.getElementById("tib-bottle-limit").value),
+    tib_pieces_per_bottle: Number(document.getElementById("tib-pieces-per-bottle").value),
+    tib_multiplication_factor: Number(document.getElementById("tib-multiplier").value),
+    rooting_rate: Number(document.getElementById("rooting-rate").value) / 100,
+    acclimatization_rate: Number(document.getElementById("acclimatization-rate").value) / 100,
+  };
+  if (targetDate) payload.target_date = targetDate;
+  if (targetPlants) payload.target_plants = Number(targetPlants);
+
+  const btn = document.getElementById("simulate-btn");
+  TissueApp.setLoading(btn, true, "กำลังจำลอง...");
+  try {
+    const result = await TissueApp.call("simulateProduction", payload);
+    renderResult(result);
+  } catch (err) {
+    alert("จำลองไม่สำเร็จ: " + err.message);
+  } finally {
+    TissueApp.setLoading(btn, false);
+  }
+});
+
+function renderResult(result) {
+  document.getElementById("result-section").classList.remove("hidden");
+
+  const s = result.summary;
+  let summaryHtml = `<div><b>จำนวนรอบทั้งหมด:</b> ${s.total_cycles} รอบ</div>`;
+  if (s.reached_target === true) {
+    summaryHtml += `<div style="color:var(--leaf);font-weight:600;margin-top:6px;">ถึงจำนวนเป้าหมาย ✓ ที่รอบที่ ${s.reached_cycle} (${s.reached_date})</div>`;
+  } else if (s.reached_target === false) {
+    summaryHtml += `<div style="color:var(--alert);font-weight:600;margin-top:6px;">ยังไม่ถึงจำนวนเป้าหมาย — ขาดอีก ${s.shortfall} ต้น</div>`;
+  }
+  document.getElementById("summary-card").innerHTML = summaryHtml;
+
+  const table = document.getElementById("result-table");
+  const headRow = "<tr>" + TABLE_COLUMNS.map(([, label]) => `<th>${label}</th>`).join("") + "</tr>";
+  const bodyRows = result.rows.map(row =>
+    "<tr>" + TABLE_COLUMNS.map(([key]) => `<td>${row[key]}</td>`).join("") + "</tr>"
+  ).join("");
+  table.innerHTML = headRow + bodyRows;
+}
+
+(async () => {
+  await TissueApp.init();
+})();
+</script>
+</body>
+</html>

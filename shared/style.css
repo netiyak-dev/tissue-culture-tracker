@@ -359,6 +359,27 @@ p { line-height: 1.6; margin: 0 0 var(--space-3) 0; }
 .storage-cell .loc { font-size: 11px; color: var(--text-muted); }
 .storage-cell.empty { background: var(--surface); border: 1px dashed var(--border); }
 
+/* หน้าจำลองรอบการผลิต */
+.sim-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-5);
+}
+.sim-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+.sim-table th, .sim-table td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border); }
+.sim-table th:first-child, .sim-table td:first-child,
+.sim-table th:nth-child(2), .sim-table td:nth-child(2) { text-align: left; }
+.sim-table th {
+  background: var(--mint);
+  color: var(--forest);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+.sim-table tbody tr:last-child td { border-bottom: none; }
+
 /* หน้าประวัติ */
 .round-badge {
   display: inline-flex;
