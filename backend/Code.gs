@@ -623,7 +623,8 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
 
   // ใช้แบบจำลองรอบการผลิตเดียวกับหน้า "จำลองรอบการผลิต" คำนวณพยากรณ์อัตโนมัติ — ไม่ใช้ตัวคูณการขยายต่อชนิดพืชอีกต่อไป
   // เริ่มจาก TODAY() เสมอ (ไม่ใช่ next_transfer_date ของล็อต) และนับเฉพาะ "ต้น" ที่ยังอยู่ระยะขยายเป็นชิ้นตั้งต้น
-  // เพราะเฉพาะระยะนี้เท่านั้นที่ยังขยายต่อผ่านระบบ SS/TIB ได้ (ไม่ใส่ rooting/acclimatization rate เพื่อให้ค่าที่ได้ยังเป็น "ต้น" สอดคล้องกับหน่วยเดิมของ stage_counts)
+  // ตั้ง rootingRate/acclimatizationRate = 0 (ไม่หัก "พร้อมออกปลูก" ออกเลยทุกรอบ) เพื่อให้ทุกชิ้นวนขยายต่อแบบทบต้นล้วนๆ
+  // ไม่ตัดออกไปกลางทาง — ต่างจากหน้าจำลอง standalone ที่ผู้ใช้ตั้งอัตรารอด > 0 ได้เพื่อจำลองการหักออกปลูกจริง
   const sysConfig = targetDate ? getSystemConfig() : null;
   const by_plant = plants.filter(p => p.active !== false).map(p => {
     const lots = activeLots.filter(t => t.plant_id === p.plant_id);
@@ -647,8 +648,8 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
           tibBottleLimit: sysConfig.tib_bottle_limit,
           tibPiecesPerBottle: sysConfig.tib_pieces_per_bottle,
           tibMultiplier: sysConfig.tib_multiplication_factor,
-          rootingRate: 1,
-          acclimatizationRate: 1,
+          rootingRate: 0,
+          acclimatizationRate: 0,
         });
         const lastRow = sim.rows[sim.rows.length - 1];
         result.predicted_total = lastRow ? lastRow.total_pieces_after_cycle : initialPieces;
@@ -822,11 +823,12 @@ function saveSystemSettings(payload) {
 // ===================================================================
 
 /**
- * จำลองการผลิตเนื้อเยื่อพืชแบบรอบการผลิต (ทุก cycleDays วัน) จนถึง targetDate หรือจนกว่าจะถึง targetPlants
+ * จำลองการผลิตเนื้อเยื่อพืชแบบรอบการผลิต (ทุก cycleDays วัน) จนถึง targetDate หรือจนกว่ายอดสะสม "พร้อมออกปลูก" จะถึง targetPlants
  * แต่ละรอบ: แบ่งจำนวนชิ้นตั้งต้นเข้าระบบ SS/TIB ตามสัดส่วนความจุของแต่ละระบบ ส่วนที่เกินความจุรวมเก็บเป็น "เหลือค้าง" (ไม่คูณ)
- * ส่วนที่โหลดเข้าได้คูณด้วยตัวคูณของระบบนั้น แล้วรวมเป็นจำนวนชิ้นตั้งต้นของรอบถัดไป
+ * ส่วนที่โหลดเข้าได้คูณด้วยตัวคูณของระบบนั้น รวมเป็นจำนวนชิ้นปลายรอบ — จากนั้นหักส่วนที่ "พร้อมออกปลูก" (= ปลายรอบ × rootingRate × acclimatizationRate)
+ * ออกจริง สะสมยอดนี้ไว้เทียบกับ targetPlants ส่วนที่เหลือ (ไม่ใช่ทั้งหมด) เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบถัดไป
  * แยกเป็นฟังก์ชันกลาง (รับค่าที่ parse แล้วเท่านั้น ไม่แตะ payload ตรงๆ) เพื่อให้ simulateProduction() (หน้าจำลอง standalone)
- * และ computeDashboardData() (พยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
+ * และ computeDashboardData() (พยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard, ตั้งอัตรารอด = 0 เพื่อไม่หักอะไรออก ขยายทบต้นล้วนๆ) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
  */
 function runProductionCycles(params) {
   const {
@@ -848,6 +850,7 @@ function runProductionCycles(params) {
   let cycleDate = new Date(startDate);
   let cycle = 0;
   let reachedAt = null;
+  let cumulativeReady = 0; // สะสมจำนวน "พร้อมออกปลูก" ที่หักออกไปจริงทุกรอบ (ไม่ใช่ตัวเลขสมมติ)
   const MAX_CYCLES = 500; // กันลูปไม่จบ (500 รอบ x 15 วัน ~ 20 ปี เกินพอสำหรับการวางแผนจริง)
 
   while (cycle < MAX_CYCLES) {
@@ -865,7 +868,10 @@ function runProductionCycles(params) {
     const leftover = inputPieces - ssLoaded - tibLoaded;
     const grossOutput = ssOutput + tibOutput;
     const totalAfterCycle = leftover + grossOutput;
-    const estimatedDeliverable = totalAfterCycle * rootingRate * acclimatizationRate;
+    // ส่วนที่ "พร้อมออกปลูก" ของรอบนี้ถูกหักออกจากวงจรขยายจริง — เหลือแค่ carriedForward เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบหน้า
+    const readyForPlanting = totalAfterCycle * rootingRate * acclimatizationRate;
+    const carriedForward = totalAfterCycle - readyForPlanting;
+    cumulativeReady += readyForPlanting;
 
     rows.push({
       cycle,
@@ -884,14 +890,15 @@ function runProductionCycles(params) {
       leftover_pieces: Math.round(leftover),
       gross_output_pieces: Math.round(grossOutput),
       total_pieces_after_cycle: Math.round(totalAfterCycle),
-      estimated_deliverable_plants: Math.round(estimatedDeliverable),
+      ready_for_planting_pieces: Math.round(readyForPlanting),
+      ready_for_planting_cumulative: Math.round(cumulativeReady),
     });
 
-    if (!reachedAt && targetPlants !== null && estimatedDeliverable >= targetPlants) {
+    if (!reachedAt && targetPlants !== null && cumulativeReady >= targetPlants) {
       reachedAt = { cycle, date: formatThaiDate(cycleDate) };
     }
 
-    inputPieces = totalAfterCycle;
+    inputPieces = carriedForward;
     const next = new Date(cycleDate); next.setDate(next.getDate() + cycleDays);
     cycleDate = next;
 
@@ -901,11 +908,12 @@ function runProductionCycles(params) {
   const lastRow = rows[rows.length - 1] || null;
   const summary = {
     total_cycles: rows.length,
+    total_ready_for_planting: lastRow ? lastRow.ready_for_planting_cumulative : 0,
     reached_target: targetPlants !== null ? !!reachedAt : null,
     reached_cycle: reachedAt ? reachedAt.cycle : null,
     reached_date: reachedAt ? reachedAt.date : null,
     shortfall: (targetPlants !== null && !reachedAt && lastRow)
-      ? Math.max(0, Math.round(targetPlants - lastRow.estimated_deliverable_plants)) : null,
+      ? Math.max(0, Math.round(targetPlants - lastRow.ready_for_planting_cumulative)) : null,
   };
 
   return { rows, summary };

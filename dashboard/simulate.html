@@ -107,7 +107,8 @@ const TABLE_COLUMNS = [
   ["tib_output_pieces", "ผลผลิต TIB"],
   ["leftover_pieces", "เหลือค้าง"],
   ["total_pieces_after_cycle", "รวมปลายรอบ"],
-  ["estimated_deliverable_plants", "ต้นที่ส่งมอบได้"],
+  ["ready_for_planting_pieces", "พร้อมออกปลูก (รอบนี้)"],
+  ["ready_for_planting_cumulative", "พร้อมออกปลูกสะสม"],
 ];
 
 document.getElementById("start-date").valueAsDate = new Date();
@@ -174,6 +175,7 @@ function renderResult(result) {
 
   const s = result.summary;
   let summaryHtml = `<div><b>จำนวนรอบทั้งหมด:</b> ${s.total_cycles} รอบ</div>`;
+  summaryHtml += `<div style="margin-top:6px;"><b>พร้อมออกปลูกสะสมรวม:</b> ${s.total_ready_for_planting} ต้น</div>`;
   if (s.reached_target === true) {
     summaryHtml += `<div style="color:var(--leaf);font-weight:600;margin-top:6px;">ถึงจำนวนเป้าหมาย ✓ ที่รอบที่ ${s.reached_cycle} (${s.reached_date})</div>`;
   } else if (s.reached_target === false) {
