@@ -622,9 +622,11 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
   });
 
   // คำนวณพยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard — เริ่มจาก TODAY() เสมอ (ไม่ใช่ next_transfer_date ของล็อต)
-  // และนับเฉพาะ "ต้น" ที่ยังอยู่ระยะขยายเป็นชิ้นตั้งต้น ไม่ใช้ตัวคูณการขยายต่อชนิดพืชอีกต่อไป
-  // ไม่เรียก runProductionCycles() เพราะฟังก์ชันนั้นตัดส่วนเกินความจุ SS/TIB ออกไปกระตุ้นรากทุกรอบที่ชิ้นเกินความจุ —
-  // พยากรณ์ของ Dashboard ต้องการทบต้นแบบไม่จำกัดความจุล้วนๆ จึงคำนวณตรงด้วยตัวคูณถ่วงน้ำหนักตามสัดส่วนความจุ SS:TIB แทน
+  // นับเฉพาะ "ต้น" ที่ยังอยู่ระยะขยายเป็นชิ้นตั้งต้น ไม่ใช้ตัวคูณการขยายต่อชนิดพืชอีกต่อไป
+  // ใช้แบบจำลองเดียวกับเครื่องมือ "จำลองรอบการผลิต" ทุกประการ (เรียก runProductionCycles ตรงๆ ไม่คำนวณซ้ำ) — ติดเพดานความจุ
+  // ของระบบ SS/TIB เหมือนกัน ส่วนเกินความจุถูกนำออกไปกระตุ้นรากแบบเดียวกัน ตั้ง acclimatizationRate = 100% เสมอ
+  // (Dashboard ไม่มีช่องกรอกอัตรารอด เป็นแค่ตัวเลขประเมินคร่าวๆ) — รวมจำนวนที่ยังอยู่ในวงจรขยาย + ที่นำออกไปกระตุ้นรากแล้วทุกรอบ
+  // เป็นยอดเดียวกัน เพื่อให้ "พยากรณ์" หมายถึงจำนวนต้นทั้งหมดที่จะมีอยู่ ณ วันนั้น ไม่ใช่แค่ส่วนที่ยังอยู่ในระบบ
   const sysConfig = targetDate ? getSystemConfig() : null;
   const by_plant = plants.filter(p => p.active !== false).map(p => {
     const lots = activeLots.filter(t => t.plant_id === p.plant_id);
@@ -636,15 +638,24 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
     if (targetDate && sysConfig) {
       const initialPieces = stage_counts["ขยาย"];
       if (initialPieces > 0) {
-        const ssCapacity = sysConfig.ss_bottle_limit * sysConfig.ss_pieces_per_bottle;
-        const tibCapacity = sysConfig.tib_bottle_limit * sysConfig.tib_pieces_per_bottle;
-        const combinedCapacity = ssCapacity + tibCapacity;
-        const ssShareRatio = combinedCapacity > 0 ? ssCapacity / combinedCapacity : 0;
-        const tibShareRatio = combinedCapacity > 0 ? tibCapacity / combinedCapacity : 0;
-        const blendedMultiplier = ssShareRatio * sysConfig.ss_multiplication_factor + tibShareRatio * sysConfig.tib_multiplication_factor;
-        const daysDiff = (targetDate - now) / (24 * 60 * 60 * 1000);
-        const numCycles = Math.max(0, Math.floor(daysDiff / sysConfig.cycle_days) + 1);
-        result.predicted_total = Math.round(initialPieces * Math.pow(blendedMultiplier, numCycles));
+        const sim = runProductionCycles({
+          initialPieces,
+          startDate: now,
+          targetDate,
+          targetPlants: null,
+          cycleDays: sysConfig.cycle_days,
+          ssBottleLimit: sysConfig.ss_bottle_limit,
+          ssPiecesPerBottle: sysConfig.ss_pieces_per_bottle,
+          ssMultiplier: sysConfig.ss_multiplication_factor,
+          tibBottleLimit: sysConfig.tib_bottle_limit,
+          tibPiecesPerBottle: sysConfig.tib_pieces_per_bottle,
+          tibMultiplier: sysConfig.tib_multiplication_factor,
+          acclimatizationRate: 1,
+        });
+        const lastRow = sim.rows[sim.rows.length - 1];
+        // total_pieces_after_cycle ของรอบสุดท้าย = ส่วนที่ยังอยู่ในวงจรขยาย + ส่วนเกินที่กำลังจะถูกนำออกไปกระตุ้นราก (ยังไม่นับใน cumulative)
+        // รวมกับยอดสะสม "พร้อมออกปลูก" ของทุกรอบก่อนหน้า ได้ยอดรวมทั้งหมดที่เคย/กำลังจะผลิตได้ ณ วันนั้น
+        result.predicted_total = lastRow ? (lastRow.total_pieces_after_cycle + sim.summary.total_ready_for_planting) : initialPieces;
       } else {
         result.predicted_total = 0;
       }
@@ -823,8 +834,8 @@ function saveSystemSettings(payload) {
  *      ในรอบ N ทันที แต่ไปโผล่ในรอบ N+1 โดยคูณด้วย acclimatizationRate ตอนนั้น (ส่วนที่ไม่รอดถือว่าสูญไปเลย ไม่กลับเข้าวงจรขยาย)
  *   2. ผลผลิตจาก SS/TIB ที่คูณแล้ว (ไม่ใช่ส่วนเกิน) เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบถัดไป
  * สะสมยอด "พร้อมออกปลูก" ของทุกรอบไว้เทียบกับ targetPlants
- * แยกเป็นฟังก์ชันกลาง (รับค่าที่ parse แล้วเท่านั้น ไม่แตะ payload ตรงๆ) ใช้โดย simulateProduction() (หน้าจำลอง standalone) เท่านั้น
- * — computeDashboardData() ไม่เรียกฟังก์ชันนี้ (พยากรณ์อัตโนมัติของ Dashboard ต้องการขยายทบต้นแบบไม่จำกัดความจุ จึงคำนวณตรงด้วยตัวคูณถ่วงน้ำหนักแยกเอง)
+ * แยกเป็นฟังก์ชันกลาง (รับค่าที่ parse แล้วเท่านั้น ไม่แตะ payload ตรงๆ) เพื่อให้ simulateProduction() (หน้าจำลอง standalone)
+ * และ computeDashboardData() (พยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard, ตั้ง acclimatizationRate = 100% เสมอเพราะ Dashboard ไม่มีช่องกรอกอัตรารอด) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
  */
 function runProductionCycles(params) {
   const {
