@@ -827,13 +827,16 @@ function saveSystemSettings(payload) {
 
 /**
  * จำลองการผลิตเนื้อเยื่อพืชแบบรอบการผลิต (ทุก cycleDays วัน) จนถึง targetDate หรือจนกว่ายอดสะสม "พร้อมออกปลูก" จะถึง targetPlants
- * แต่ละรอบ: แบ่งจำนวนชิ้นตั้งต้นเข้าระบบ SS/TIB ตามสัดส่วนความจุของแต่ละระบบ ส่วนที่เกินความจุรวม (ระบบเต็มแล้ว ไม่มีที่ลงต่อ) ถือเป็น
+ * แต่ละรอบ: ดันจำนวนชิ้นตั้งต้นเข้าระบบ TIB ให้เต็มความจุก่อนเสมอ (ตัวคูณสูงกว่า ใช้ประโยชน์จากความจุที่มีให้คุ้มที่สุด) เหลือเท่าไหร่
+ * ค่อยลงระบบ SS ส่วนที่เกินความจุรวมทั้งสองระบบ (ทั้ง TIB และ SS เต็มแล้ว ไม่มีที่ลงต่อ) ถือเป็น
  * "ส่วนเกิน" ที่ถูกนำออกไปกระตุ้นรากทันที — ไม่มีอัตรา/เกณฑ์ขั้นต่ำให้ตั้งเองอีกต่อไป ความจุของระบบ SS/TIB เป็นตัวกำหนดเองโดยอัตโนมัติ
  * ส่วนที่โหลดเข้า SS/TIB ได้ คูณด้วยตัวคูณของระบบนั้น แล้ววนกลับเป็นชิ้นตั้งต้นของรอบถัดไป (เฉพาะผลผลิตที่คูณแล้วเท่านั้นที่วนต่อ) จากนั้น:
  *   1. ส่วนเกินของรอบนี้ (ที่ไม่มีที่ลง SS/TIB) การกระตุ้นรากใช้เวลา 1 รอบการผลิต — ของที่ถูกนำออกไปในรอบ N จะยังไม่กลายเป็น "พร้อมออกปลูก"
  *      ในรอบ N ทันที แต่ไปโผล่ในรอบ N+1 โดยคูณด้วย acclimatizationRate ตอนนั้น (ส่วนที่ไม่รอดถือว่าสูญไปเลย ไม่กลับเข้าวงจรขยาย)
  *   2. ผลผลิตจาก SS/TIB ที่คูณแล้ว (ไม่ใช่ส่วนเกิน) เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบถัดไป
  * สะสมยอด "พร้อมออกปลูก" ของทุกรอบไว้เทียบกับ targetPlants
+ * ถ้ามี targetDate: จำนวนรอบทั้งหมด = floor((targetDate - startDate) / cycleDays) เสมอ (ปัดลง ไม่ปัดขึ้น) — รอบที่ "เริ่ม" แล้วแต่ยังไม่ครบ
+ * cycleDays วันก่อนถึง targetDate จะไม่ถูกนับเป็นรอบที่จำลอง (ต้องครบรอบเต็มๆ เท่านั้นถึงนับ)
  * แยกเป็นฟังก์ชันกลาง (รับค่าที่ parse แล้วเท่านั้น ไม่แตะ payload ตรงๆ) เพื่อให้ simulateProduction() (หน้าจำลอง standalone)
  * และ computeDashboardData() (พยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard, ตั้ง acclimatizationRate = 100% เสมอเพราะ Dashboard ไม่มีช่องกรอกอัตรารอด) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
  */
@@ -847,10 +850,10 @@ function runProductionCycles(params) {
 
   const ssCapacity = ssBottleLimit * ssPiecesPerBottle;
   const tibCapacity = tibBottleLimit * tibPiecesPerBottle;
-  const combinedCapacity = ssCapacity + tibCapacity;
-  // แบ่งจำนวนชิ้นตั้งต้นเข้า SS/TIB ตามสัดส่วนความจุของแต่ละระบบ (ไม่ใช่เติมระบบใดระบบหนึ่งให้เต็มก่อน)
-  const ssShareRatio = combinedCapacity > 0 ? ssCapacity / combinedCapacity : 0;
-  const tibShareRatio = combinedCapacity > 0 ? tibCapacity / combinedCapacity : 0;
+  // จำนวนรอบสูงสุดที่อนุญาตตาม targetDate — ปัดลงเสมอ (รอบที่ยังไม่ครบ cycleDays วันก่อนถึง targetDate ไม่นับ)
+  const maxCyclesByDate = targetDate
+    ? Math.floor(((targetDate - new Date(startDate)) / (24 * 60 * 60 * 1000) + 1e-9) / cycleDays)
+    : null;
 
   const rows = [];
   let inputPieces = initialPieces;
@@ -862,13 +865,13 @@ function runProductionCycles(params) {
   const MAX_CYCLES = 500; // กันลูปไม่จบ (500 รอบ x 15 วัน ~ 20 ปี เกินพอสำหรับการวางแผนจริง)
 
   while (cycle < MAX_CYCLES) {
-    if (targetDate && cycleDate > targetDate) break;
+    if (maxCyclesByDate !== null && cycle >= maxCyclesByDate) break;
     cycle++;
 
-    const ssShare = inputPieces * ssShareRatio;
-    const tibShare = inputPieces * tibShareRatio;
-    const ssLoaded = Math.min(ssShare, ssCapacity);
-    const tibLoaded = Math.min(tibShare, tibCapacity);
+    // ดัน TIB ให้เต็มความจุก่อนเสมอ (ตัวคูณสูงกว่า SS) เหลือเท่าไหร่ค่อยลง SS
+    const tibLoaded = Math.min(inputPieces, tibCapacity);
+    const remainingAfterTib = inputPieces - tibLoaded;
+    const ssLoaded = Math.min(remainingAfterTib, ssCapacity);
     const ssBottlesUsed = ssPiecesPerBottle > 0 ? Math.ceil(ssLoaded / ssPiecesPerBottle) : 0;
     const tibBottlesUsed = tibPiecesPerBottle > 0 ? Math.ceil(tibLoaded / tibPiecesPerBottle) : 0;
     const ssOutput = ssLoaded * ssMultiplier;
