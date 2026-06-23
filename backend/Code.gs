@@ -576,8 +576,9 @@ function computeDashboardData(transfers, plants, storage) {
 
   const by_plant = plants.filter(p => p.active !== false).map(p => {
     const lots = activeLots.filter(t => t.plant_id === p.plant_id);
+    // stage_counts นับเป็นจำนวน "ต้น" รวม (ผลรวม quantity ของล็อตในระยะนั้น) ไม่ใช่จำนวนล็อต
     const stage_counts = { "ขยาย": 0, "กระตุ้นราก": 0, "พร้อมออกปลูก": 0 };
-    lots.forEach(t => { stage_counts[t.stage] = (stage_counts[t.stage] || 0) + 1; });
+    lots.forEach(t => { stage_counts[t.stage] = (stage_counts[t.stage] || 0) + Number(t.quantity || 0); });
     const dominant_stage = Object.keys(stage_counts).reduce((a, b) => stage_counts[a] >= stage_counts[b] ? a : b, "ขยาย");
     return { plant_name: p.plant_name, total: lots.length, stage_counts, dominant_stage };
   });
