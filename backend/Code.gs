@@ -826,20 +826,24 @@ function saveSystemSettings(payload) {
  * จำลองการผลิตเนื้อเยื่อพืชแบบรอบการผลิต (ทุก cycleDays วัน) จนถึง targetDate หรือจนกว่ายอดสะสม "พร้อมออกปลูก" จะถึง targetPlants
  * แต่ละรอบ: แบ่งจำนวนชิ้นตั้งต้นเข้าระบบ SS/TIB ตามสัดส่วนความจุของแต่ละระบบ ส่วนที่เกินความจุรวมเก็บเป็น "เหลือค้าง" (ไม่คูณ)
  * ส่วนที่โหลดเข้าได้คูณด้วยตัวคูณของระบบนั้น รวมเป็นจำนวนชิ้นปลายรอบ — จากนั้น:
- *   1. หยิบส่วนที่ "นำไปกระตุ้นราก" ออกจากวงจรขยายจริงตาม rootingRate (= ปลายรอบ × rootingRate) ส่วนนี้ไม่วนกลับมาขยายต่ออีกไม่ว่าจะรอดหรือไม่
- *   2. ของที่หยิบออกไปนั้น มีแค่ acclimatizationRate ที่รอดจนเป็นต้นพร้อมส่งมอบจริง ("พร้อมออกปลูก" ของรอบนี้) ส่วนที่ไม่รอดถือว่าสูญไปเลย
- *   3. ส่วนที่เหลือ (ปลายรอบ − ที่หยิบออกไปกระตุ้นราก) เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบถัดไป
+ *   1. ถ้าจำนวนชิ้นปลายรอบเกิน rootingThresholdPieces (เกณฑ์ขั้นต่ำก่อนเริ่มกระตุ้นราก) เท่านั้น ถึงจะหยิบส่วนที่ "นำไปกระตุ้นราก" ออกจากวงจรขยายจริงตาม
+ *      rootingRate (= ปลายรอบ × rootingRate) — ถ้ายังไม่เกินเกณฑ์ ไม่หยิบออกเลยในรอบนี้ (เท่ากับ rootingRate = 0 ชั่วคราว) ปล่อยให้ขยายทบต้นต่อไปก่อน
+ *      ส่วนที่หยิบออกไปนี้ไม่วนกลับมาขยายต่ออีกไม่ว่าจะรอดหรือไม่
+ *   2. การกระตุ้นรากใช้เวลา 1 รอบการผลิต — ของที่หยิบออกไปในรอบ N จะยังไม่กลายเป็น "พร้อมออกปลูก" ในรอบ N ทันที แต่ไปโผล่ในรอบ N+1
+ *      โดยคูณด้วย acclimatizationRate ตอนนั้น (ส่วนที่ไม่รอดถือว่าสูญไปเลย ไม่กลับเข้าวงจรขยาย)
+ *   3. ส่วนที่เหลือ (ปลายรอบ − ที่หยิบออกไปกระตุ้นรากรอบนี้) เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบถัดไป
  * สะสมยอด "พร้อมออกปลูก" ของทุกรอบไว้เทียบกับ targetPlants
  * แยกเป็นฟังก์ชันกลาง (รับค่าที่ parse แล้วเท่านั้น ไม่แตะ payload ตรงๆ) เพื่อให้ simulateProduction() (หน้าจำลอง standalone)
- * และ computeDashboardData() (พยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard, ตั้ง rootingRate = 0 เพื่อไม่หยิบอะไรออก ขยายทบต้นล้วนๆ) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
+ * และ computeDashboardData() (พยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard, ตั้ง rootingRate = 0 เพื่อไม่หยิบอะไรออก ขยายทบต้นล้วนๆ — ไม่กระทบจาก threshold/delay นี้) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
  */
 function runProductionCycles(params) {
   const {
     initialPieces, startDate, targetDate, targetPlants, cycleDays,
     ssBottleLimit, ssPiecesPerBottle, ssMultiplier,
     tibBottleLimit, tibPiecesPerBottle, tibMultiplier,
-    rootingRate, acclimatizationRate,
+    rootingRate, acclimatizationRate, rootingThresholdPieces,
   } = params;
+  const threshold = rootingThresholdPieces || 0;
 
   const ssCapacity = ssBottleLimit * ssPiecesPerBottle;
   const tibCapacity = tibBottleLimit * tibPiecesPerBottle;
@@ -854,6 +858,7 @@ function runProductionCycles(params) {
   let cycle = 0;
   let reachedAt = null;
   let cumulativeReady = 0; // สะสมจำนวน "พร้อมออกปลูก" ที่หักออกไปจริงทุกรอบ (ไม่ใช่ตัวเลขสมมติ)
+  let pendingRooting = 0; // ของที่หยิบออกไปกระตุ้นรากรอบที่แล้ว ยังไม่แปลงเป็น "พร้อมออกปลูก" จนกว่าจะถึงรอบนี้
   const MAX_CYCLES = 500; // กันลูปไม่จบ (500 รอบ x 15 วัน ~ 20 ปี เกินพอสำหรับการวางแผนจริง)
 
   while (cycle < MAX_CYCLES) {
@@ -872,10 +877,11 @@ function runProductionCycles(params) {
     const grossOutput = ssOutput + tibOutput;
     const totalAfterCycle = leftover + grossOutput;
     // rootingRate = อัตรา "นำไปกระตุ้นราก" คือสัดส่วนของรอบนี้ที่ถูกหยิบออกจากวงจรขยายไปเข้าระยะกระตุ้นราก (ออกจากลูปเลย ไม่ว่าจะรอดหรือไม่)
-    // acclimatizationRate = อัตรา "รอดหลังออกปลูก" คือสัดส่วนของที่ถูกหยิบออกไปแล้วที่รอดจริงจนเป็นต้นพร้อมส่งมอบ (ส่วนที่ไม่รอดถือว่าสูญไปเลย ไม่กลับเข้าลูป)
-    const sentToRooting = totalAfterCycle * rootingRate;
+    // เริ่มหยิบออกได้ก็ต่อเมื่อปลายรอบเกิน threshold เท่านั้น (ยังไม่เกิน = ปล่อยขยายทบต้นต่อ ไม่หยิบออกเลย)
+    const sentToRooting = totalAfterCycle > threshold ? totalAfterCycle * rootingRate : 0;
     const carriedForward = totalAfterCycle - sentToRooting;
-    const readyForPlanting = sentToRooting * acclimatizationRate;
+    // acclimatizationRate = อัตรา "รอดหลังออกปลูก" — ใช้แปลง pendingRooting ของรอบที่แล้ว (ไม่ใช่ sentToRooting ของรอบนี้) เพราะกระตุ้นรากใช้เวลา 1 รอบ
+    const readyForPlanting = pendingRooting * acclimatizationRate;
     cumulativeReady += readyForPlanting;
 
     rows.push({
@@ -904,6 +910,7 @@ function runProductionCycles(params) {
       reachedAt = { cycle, date: formatThaiDate(cycleDate) };
     }
 
+    pendingRooting = sentToRooting; // ของรอบนี้ จะไปแปลงเป็น "พร้อมออกปลูก" ในรอบหน้า
     inputPieces = carriedForward;
     const next = new Date(cycleDate); next.setDate(next.getDate() + cycleDays);
     cycleDate = next;
@@ -914,6 +921,7 @@ function runProductionCycles(params) {
   const lastRow = rows[rows.length - 1] || null;
   const summary = {
     total_cycles: rows.length,
+    pending_rooting: Math.round(pendingRooting), // ของรอบสุดท้ายที่ยังค้างอยู่ระยะกระตุ้นราก ยังไม่ถูกนับเป็น "พร้อมออกปลูก" (เพราะ "รอบหน้า" ไม่ถูกจำลองแล้ว)
     total_ready_for_planting: lastRow ? lastRow.ready_for_planting_cumulative : 0,
     reached_target: targetPlants !== null ? !!reachedAt : null,
     reached_cycle: reachedAt ? reachedAt.cycle : null,
@@ -954,6 +962,7 @@ function simulateProduction(payload) {
     tibMultiplier: Number(payload.tib_multiplication_factor) || cfg.tib_multiplication_factor,
     rootingRate: (payload.rooting_rate !== undefined && payload.rooting_rate !== "") ? Number(payload.rooting_rate) : 1,
     acclimatizationRate: (payload.acclimatization_rate !== undefined && payload.acclimatization_rate !== "") ? Number(payload.acclimatization_rate) : 1,
+    rootingThresholdPieces: (payload.rooting_threshold_pieces !== undefined && payload.rooting_threshold_pieces !== "") ? Number(payload.rooting_threshold_pieces) : 0,
   });
 }
 

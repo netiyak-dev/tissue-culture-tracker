@@ -79,6 +79,10 @@
     <label>อัตรารอดหลังออกปลูก (%) — สัดส่วนของที่หยิบออกไปแล้วที่รอดจริงจนเป็นต้นพร้อมส่งมอบ</label>
     <input type="number" id="acclimatization-rate" min="0" max="100" value="100" />
   </div>
+  <div class="field">
+    <label>เกณฑ์ขั้นต่ำก่อนเริ่มกระตุ้นราก (ชิ้น) — ต้องมีจำนวนชิ้นปลายรอบเกินเท่านี้ก่อน ถึงจะเริ่มหยิบออกไปกระตุ้นราก</label>
+    <input type="number" id="rooting-threshold" min="0" value="50000" />
+  </div>
 
   <button id="simulate-btn" class="btn btn-primary btn-block">จำลอง</button>
 
@@ -155,6 +159,7 @@ document.getElementById("simulate-btn").addEventListener("click", async () => {
     tib_multiplication_factor: Number(document.getElementById("tib-multiplier").value),
     rooting_rate: Number(document.getElementById("rooting-rate").value) / 100,
     acclimatization_rate: Number(document.getElementById("acclimatization-rate").value) / 100,
+    rooting_threshold_pieces: Number(document.getElementById("rooting-threshold").value) || 0,
   };
   if (targetDate) payload.target_date = targetDate;
   if (targetPlants) payload.target_plants = Number(targetPlants);
@@ -177,6 +182,9 @@ function renderResult(result) {
   const s = result.summary;
   let summaryHtml = `<div><b>จำนวนรอบทั้งหมด:</b> ${s.total_cycles} รอบ</div>`;
   summaryHtml += `<div style="margin-top:6px;"><b>พร้อมออกปลูกสะสมรวม:</b> ${s.total_ready_for_planting} ต้น</div>`;
+  if (s.pending_rooting > 0) {
+    summaryHtml += `<div class="muted" style="margin-top:6px;">ยังอยู่ในระยะกระตุ้นราก (ของรอบสุดท้าย ยังไม่นับเป็นพร้อมออกปลูก): ${s.pending_rooting} ชิ้น</div>`;
+  }
   if (s.reached_target === true) {
     summaryHtml += `<div style="color:var(--leaf);font-weight:600;margin-top:6px;">ถึงจำนวนเป้าหมาย ✓ ที่รอบที่ ${s.reached_cycle} (${s.reached_date})</div>`;
   } else if (s.reached_target === false) {
