@@ -20,6 +20,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="plants">ชนิดพืช</div>
     <div class="tab" data-tab="storage">ที่เก็บ</div>
+    <div class="tab hidden" id="tab-system" data-tab="system">ระบบ SS/TIB</div>
     <div class="tab hidden" id="tab-permissions" data-tab="permissions">สิทธิ์ผู้ใช้</div>
   </div>
 
@@ -38,7 +39,47 @@
     <p class="muted" style="margin-top:16px;">กดปุ่ม "+ เพิ่ม" เพื่อเพิ่มชั้น/ช่องใหม่ได้ทุกเมื่อ ไม่ต้องพึ่งช่างไอที</p>
   </div>
 
-  <!-- แท็บ 3: สิทธิ์ผู้ใช้ (แอดมินเท่านั้น) -->
+  <!-- แท็บ 3: ระบบ SS/TIB (แอดมินเท่านั้น) -->
+  <div class="tab-panel" id="panel-system">
+    <p class="muted">ค่าพารามิเตอร์ระบบ SS/TIB นี้เป็นค่าเดียวของทั้งระบบ (ไม่แยกตามชนิดพืช) — ใช้คำนวณพยากรณ์อัตโนมัติที่หน้าสรุปข้อมูล และเป็นค่าเริ่มต้นของหน้า "จำลองรอบการผลิต" (แก้ในหน้าจำลองได้เฉพาะครั้งที่กำลังทำ ไม่กระทบค่านี้)</p>
+
+    <div class="field" style="margin-top:16px;">
+      <label>จำนวนวันต่อรอบการผลิต</label>
+      <input type="number" id="sys-cycle-days" min="1" />
+    </div>
+
+    <h3 style="margin-top:20px;">ระบบ SS (กึ่งแข็ง)</h3>
+    <div class="field">
+      <label>ขวดสูงสุด</label>
+      <input type="number" id="sys-ss-bottle-limit" min="1" />
+    </div>
+    <div class="field">
+      <label>ชิ้นต่อขวด</label>
+      <input type="number" id="sys-ss-pieces-per-bottle" min="1" />
+    </div>
+    <div class="field">
+      <label>ตัวคูณต่อรอบ — จำนวนชิ้นใหม่ที่ได้จากชิ้นเดิม</label>
+      <input type="number" id="sys-ss-multiplier" min="0.1" step="0.1" />
+    </div>
+
+    <h3 style="margin-top:20px;">ระบบ TIB (อาหารเหลว)</h3>
+    <div class="field">
+      <label>ขวดสูงสุด</label>
+      <input type="number" id="sys-tib-bottle-limit" min="1" />
+    </div>
+    <div class="field">
+      <label>ชิ้นต่อขวด</label>
+      <input type="number" id="sys-tib-pieces-per-bottle" min="1" />
+    </div>
+    <div class="field">
+      <label>ตัวคูณต่อรอบ — จำนวนชิ้นใหม่ที่ได้จากชิ้นเดิม</label>
+      <input type="number" id="sys-tib-multiplier" min="0.1" step="0.1" />
+    </div>
+
+    <button id="save-system-btn" class="btn btn-primary btn-block">บันทึก</button>
+  </div>
+
+  <!-- แท็บ 4: สิทธิ์ผู้ใช้ (แอดมินเท่านั้น) -->
   <div class="tab-panel" id="panel-permissions">
     <p class="muted">รายชื่อคนที่เปิดแอปนี้ผ่าน Line แล้ว — ตั้ง Lab และสิทธิ์ได้ที่นี่ Admin จะเห็นข้อมูลทุก Lab และได้รับแจ้งเตือนทุกครั้งที่มีการบันทึก ส่วน User เห็นเฉพาะ Lab ของตัวเอง คนที่เพิ่งเปิดแอปครั้งแรกจะมีสถานะ "รออนุมัติ" ต้องกดอนุมัติ (หรือเลือก Lab ให้) ก่อนถึงจะเริ่มใช้งานได้</p>
     <div id="permissions-list"></div>
@@ -269,6 +310,41 @@ function renderStorageChips(container, items, type, promptText) {
   container.appendChild(addChip);
 }
 
+// ---------- แท็บระบบ SS/TIB (แอดมินเท่านั้น) ----------
+const SYSTEM_FIELD_IDS = {
+  cycle_days: "sys-cycle-days",
+  ss_bottle_limit: "sys-ss-bottle-limit",
+  ss_pieces_per_bottle: "sys-ss-pieces-per-bottle",
+  ss_multiplication_factor: "sys-ss-multiplier",
+  tib_bottle_limit: "sys-tib-bottle-limit",
+  tib_pieces_per_bottle: "sys-tib-pieces-per-bottle",
+  tib_multiplication_factor: "sys-tib-multiplier",
+};
+
+async function loadSystemSettings() {
+  const cfg = await TissueApp.call("getSystemSettings");
+  Object.keys(SYSTEM_FIELD_IDS).forEach(key => {
+    document.getElementById(SYSTEM_FIELD_IDS[key]).value = cfg[key];
+  });
+}
+
+document.getElementById("save-system-btn").addEventListener("click", async () => {
+  const payload = {};
+  Object.keys(SYSTEM_FIELD_IDS).forEach(key => {
+    payload[key] = Number(document.getElementById(SYSTEM_FIELD_IDS[key]).value);
+  });
+  const btn = document.getElementById("save-system-btn");
+  TissueApp.setLoading(btn, true);
+  try {
+    await TissueApp.call("saveSystemSettings", payload);
+    alert("บันทึกแล้ว ✓");
+  } catch (err) {
+    alert("บันทึกไม่สำเร็จ: " + err.message);
+  } finally {
+    TissueApp.setLoading(btn, false);
+  }
+});
+
 // ---------- แท็บสิทธิ์ผู้ใช้ (แอดมินเท่านั้น) — ใช้ LABS ตัวเดียวกับที่ประกาศไว้ใน js/api.js ----------
 async function loadPermissionsSettings() {
   const list = document.getElementById("permissions-list");
@@ -356,7 +432,9 @@ async function loadPermissionsSettings() {
   await TissueApp.init();
   const tasks = [loadPlantSettings(), loadStorageSettings()];
   if (TissueApp.isAdmin()) {
+    document.getElementById("tab-system").classList.remove("hidden");
     document.getElementById("tab-permissions").classList.remove("hidden");
+    tasks.push(loadSystemSettings());
     tasks.push(loadPermissionsSettings());
   }
   await Promise.all(tasks);

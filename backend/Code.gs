@@ -46,7 +46,26 @@ const SHEET_SCHEMAS = {
     "stage", "recipe_used", "next_transfer_date", "recorded_by", "created_at",
   ],
   LineUsers: ["line_user_id", "display_name", "role", "lab", "active", "approved"],
+  // ค่าพารามิเตอร์ระบบ SS/TIB ระดับระบบ (ไม่ใช่ต่อชนิดพืช) — มีแถวเดียวเสมอ (config_id = "global")
+  // ใช้ทั้งคำนวณพยากรณ์อัตโนมัติที่ Dashboard และเป็นค่าเริ่มต้นของหน้า "จำลองรอบการผลิต" (แก้ได้ที่ตั้งค่า > ระบบ SS/TIB)
+  SystemConfig: [
+    "config_id", "cycle_days",
+    "ss_bottle_limit", "ss_pieces_per_bottle", "ss_multiplication_factor",
+    "tib_bottle_limit", "tib_pieces_per_bottle", "tib_multiplication_factor",
+  ],
 };
+
+const SYSTEM_CONFIG_DEFAULTS = {
+  cycle_days: 15,
+  ss_bottle_limit: 2000, ss_pieces_per_bottle: 8, ss_multiplication_factor: 5,
+  tib_bottle_limit: 200, tib_pieces_per_bottle: 20, tib_multiplication_factor: 20,
+};
+
+function seedSystemConfigIfEmpty() {
+  if (getSheetData("SystemConfig").length === 0) {
+    appendRow("SystemConfig", { config_id: "global", ...SYSTEM_CONFIG_DEFAULTS });
+  }
+}
 
 /** รันครั้งเดียวตอนติดตั้งระบบครั้งแรก: สร้างชีต + หัวคอลัมน์ (ไม่ลบของเดิมถ้ามีอยู่แล้ว) */
 function setupSheets() {
@@ -66,19 +85,26 @@ function setupSheets() {
     ["1", "2", "3", "4"].forEach(v => appendRow("Storage", { type: "shelf", value: v, active: true }));
     ["A", "B", "C"].forEach(v => appendRow("Storage", { type: "sub_shelf", value: v, active: true }));
   }
+  seedSystemConfigIfEmpty();
   Logger.log("ติดตั้งชีตเรียบร้อย");
 }
 
 /**
  * รันเมื่อมีการอัปเดตโค้ดที่เพิ่มคอลัมน์ใหม่ (เช่นตอนนี้) แล้วชีตเดิมมีข้อมูลอยู่แล้ว
  * จะเติมคอลัมน์ที่ขาดไปต่อท้ายคอลัมน์เดิม โดยไม่แก้ไข/ลบข้อมูลที่มีอยู่
- * ปลอดภัย รันซ้ำได้หลายครั้งไม่มีผลเสีย
+ * ปลอดภัย รันซ้ำได้หลายครั้งไม่มีผลเสีย — ถ้าชีตที่เพิ่งเพิ่มเข้าระบบ (เช่น SystemConfig) ยังไม่มีอยู่เลย จะสร้างให้ด้วย
  */
 function migrateSheets() {
   const ss = getSS();
   Object.keys(SHEET_SCHEMAS).forEach(name => {
-    const sheet = ss.getSheetByName(name);
-    if (!sheet) return;
+    let sheet = ss.getSheetByName(name);
+    if (!sheet) {
+      sheet = ss.insertSheet(name);
+      sheet.getRange(1, 1, 1, SHEET_SCHEMAS[name].length).setValues([SHEET_SCHEMAS[name]]);
+      sheet.setFrozenRows(1);
+      Logger.log(`สร้างชีตใหม่: ${name}`);
+      return;
+    }
     const lastCol = Math.max(sheet.getLastColumn(), 1);
     const existingHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     const missing = SHEET_SCHEMAS[name].filter(h => existingHeaders.indexOf(h) === -1);
@@ -87,6 +113,7 @@ function migrateSheets() {
       Logger.log(`เพิ่มคอลัมน์ใหม่ในชีต ${name}: ${missing.join(", ")}`);
     }
   });
+  seedSystemConfigIfEmpty();
   Logger.log("ย้ายโครงสร้างชีตเรียบร้อย");
 }
 
@@ -231,6 +258,8 @@ function doPost(e) {
       listActiveLots,
       getLotHistory,
       simulateProduction,
+      getSystemSettings,
+      saveSystemSettings,
     };
     if (!handlers[action]) throw new Error("ไม่รู้จัก action: " + action);
     const result = handlers[action](payload);
@@ -592,6 +621,10 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
     };
   });
 
+  // ใช้แบบจำลองรอบการผลิตเดียวกับหน้า "จำลองรอบการผลิต" คำนวณพยากรณ์อัตโนมัติ — ไม่ใช้ตัวคูณการขยายต่อชนิดพืชอีกต่อไป
+  // เริ่มจาก TODAY() เสมอ (ไม่ใช่ next_transfer_date ของล็อต) และนับเฉพาะ "ต้น" ที่ยังอยู่ระยะขยายเป็นชิ้นตั้งต้น
+  // เพราะเฉพาะระยะนี้เท่านั้นที่ยังขยายต่อผ่านระบบ SS/TIB ได้ (ไม่ใส่ rooting/acclimatization rate เพื่อให้ค่าที่ได้ยังเป็น "ต้น" สอดคล้องกับหน่วยเดิมของ stage_counts)
+  const sysConfig = targetDate ? getSystemConfig() : null;
   const by_plant = plants.filter(p => p.active !== false).map(p => {
     const lots = activeLots.filter(t => t.plant_id === p.plant_id);
     // stage_counts นับเป็นจำนวน "ต้น" รวม (ผลรวม quantity ของล็อตในระยะนั้น) ไม่ใช่จำนวนล็อต
@@ -599,9 +632,29 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
     lots.forEach(t => { stage_counts[t.stage] = (stage_counts[t.stage] || 0) + Number(t.quantity || 0); });
     const dominant_stage = Object.keys(stage_counts).reduce((a, b) => stage_counts[a] >= stage_counts[b] ? a : b, "ขยาย");
     const result = { plant_name: p.plant_name, total: lots.length, stage_counts, dominant_stage };
-    if (targetDate) {
-      const predicted = lots.reduce((sum, t) => sum + predictQuantityForLot(t, p, targetDate), 0);
-      result.predicted_total = Math.round(predicted);
+    if (targetDate && sysConfig) {
+      const initialPieces = stage_counts["ขยาย"];
+      if (initialPieces > 0) {
+        const sim = runProductionCycles({
+          initialPieces,
+          startDate: now,
+          targetDate,
+          targetPlants: null,
+          cycleDays: sysConfig.cycle_days,
+          ssBottleLimit: sysConfig.ss_bottle_limit,
+          ssPiecesPerBottle: sysConfig.ss_pieces_per_bottle,
+          ssMultiplier: sysConfig.ss_multiplication_factor,
+          tibBottleLimit: sysConfig.tib_bottle_limit,
+          tibPiecesPerBottle: sysConfig.tib_pieces_per_bottle,
+          tibMultiplier: sysConfig.tib_multiplication_factor,
+          rootingRate: 1,
+          acclimatizationRate: 1,
+        });
+        const lastRow = sim.rows[sim.rows.length - 1];
+        result.predicted_total = lastRow ? lastRow.total_pieces_after_cycle : initialPieces;
+      } else {
+        result.predicted_total = 0;
+      }
     }
     return result;
   });
@@ -723,36 +776,65 @@ function getLotHistory(payload) {
 }
 
 // ===================================================================
+// Handler: ตั้งค่าระบบ SS/TIB (พารามิเตอร์ระดับระบบ ไม่ใช่ต่อชนิดพืช)
+// ===================================================================
+
+/** อ่านค่าพารามิเตอร์ระบบ SS/TIB ปัจจุบัน (ผสมกับค่า default ถ้าบางช่องยังไม่ตั้ง) — ใช้ภายใน ไม่ผ่าน payload */
+function getSystemConfig() {
+  const rows = getSheetData("SystemConfig");
+  const row = rows.find(r => r.config_id === "global");
+  const merged = {};
+  Object.keys(SYSTEM_CONFIG_DEFAULTS).forEach(key => {
+    const raw = row ? row[key] : undefined;
+    merged[key] = (raw !== undefined && raw !== "") ? Number(raw) : SYSTEM_CONFIG_DEFAULTS[key];
+  });
+  return merged;
+}
+
+/** สำหรับหน้าตั้งค่า > ระบบ SS/TIB และเป็นค่าเริ่มต้นของหน้า "จำลองรอบการผลิต" */
+function getSystemSettings() {
+  return getSystemConfig();
+}
+
+/** แอดมินเท่านั้นที่แก้พารามิเตอร์ระบบ SS/TIB ได้ (มีผลกับการพยากรณ์ทุกชนิดพืชใน Dashboard ทันที) */
+function saveSystemSettings(payload) {
+  requireAdmin(payload);
+  const fields = Object.keys(SYSTEM_CONFIG_DEFAULTS);
+  fields.forEach(f => {
+    if (payload[f] === undefined || payload[f] === "" || isNaN(Number(payload[f])) || Number(payload[f]) <= 0) {
+      throw new Error("กรุณากรอกค่าให้ถูกต้อง (ต้องเป็นตัวเลขมากกว่า 0): " + f);
+    }
+  });
+  const rows = getSheetData("SystemConfig");
+  const existing = rows.find(r => r.config_id === "global");
+  const record = { config_id: "global" };
+  fields.forEach(f => { record[f] = Number(payload[f]); });
+  if (existing) {
+    updateRow("SystemConfig", existing._row, record);
+  } else {
+    appendRow("SystemConfig", record);
+  }
+  return { updated: true };
+}
+
+// ===================================================================
 // Handler: จำลองรอบการผลิต (เครื่องมือวางแผนกำลังผลิตล่วงหน้า — ไม่อ่าน/เขียน Transfers แยกอิสระจากข้อมูลล็อตจริง)
 // ===================================================================
 
 /**
- * จำลองการผลิตเนื้อเยื่อพืชแบบรอบการผลิต (ทุก cycle_days วัน) จนถึง target_date หรือจนกว่าจะถึง target_plants
+ * จำลองการผลิตเนื้อเยื่อพืชแบบรอบการผลิต (ทุก cycleDays วัน) จนถึง targetDate หรือจนกว่าจะถึง targetPlants
  * แต่ละรอบ: แบ่งจำนวนชิ้นตั้งต้นเข้าระบบ SS/TIB ตามสัดส่วนความจุของแต่ละระบบ ส่วนที่เกินความจุรวมเก็บเป็น "เหลือค้าง" (ไม่คูณ)
  * ส่วนที่โหลดเข้าได้คูณด้วยตัวคูณของระบบนั้น แล้วรวมเป็นจำนวนชิ้นตั้งต้นของรอบถัดไป
+ * แยกเป็นฟังก์ชันกลาง (รับค่าที่ parse แล้วเท่านั้น ไม่แตะ payload ตรงๆ) เพื่อให้ simulateProduction() (หน้าจำลอง standalone)
+ * และ computeDashboardData() (พยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
  */
-function simulateProduction(payload) {
-  if (!payload.initial_pieces || Number(payload.initial_pieces) <= 0) {
-    throw new Error("กรุณาใส่จำนวนชิ้นตั้งต้น");
-  }
-  const targetDate = payload.target_date ? new Date(payload.target_date) : null;
-  const targetPlants = (payload.target_plants !== undefined && payload.target_plants !== "")
-    ? Number(payload.target_plants) : null;
-  if (!targetDate && targetPlants === null) {
-    throw new Error("กรุณาระบุวันที่ต้องการเนื้อเยื่อหรือจำนวนต้นเป้าหมายอย่างน้อยหนึ่งอย่าง");
-  }
-
-  const startDate = payload.start_date ? new Date(payload.start_date) : new Date();
-  const cycleDays = Number(payload.cycle_days) || 15;
-
-  const ssBottleLimit = Number(payload.ss_bottle_limit) || 2000;
-  const ssPiecesPerBottle = Number(payload.ss_pieces_per_bottle) || 8;
-  const ssMultiplier = Number(payload.ss_multiplication_factor) || 5;
-  const tibBottleLimit = Number(payload.tib_bottle_limit) || 200;
-  const tibPiecesPerBottle = Number(payload.tib_pieces_per_bottle) || 20;
-  const tibMultiplier = Number(payload.tib_multiplication_factor) || 20;
-  const rootingRate = (payload.rooting_rate !== undefined && payload.rooting_rate !== "") ? Number(payload.rooting_rate) : 1;
-  const acclimatizationRate = (payload.acclimatization_rate !== undefined && payload.acclimatization_rate !== "") ? Number(payload.acclimatization_rate) : 1;
+function runProductionCycles(params) {
+  const {
+    initialPieces, startDate, targetDate, targetPlants, cycleDays,
+    ssBottleLimit, ssPiecesPerBottle, ssMultiplier,
+    tibBottleLimit, tibPiecesPerBottle, tibMultiplier,
+    rootingRate, acclimatizationRate,
+  } = params;
 
   const ssCapacity = ssBottleLimit * ssPiecesPerBottle;
   const tibCapacity = tibBottleLimit * tibPiecesPerBottle;
@@ -762,7 +844,7 @@ function simulateProduction(payload) {
   const tibShareRatio = combinedCapacity > 0 ? tibCapacity / combinedCapacity : 0;
 
   const rows = [];
-  let inputPieces = Number(payload.initial_pieces);
+  let inputPieces = initialPieces;
   let cycleDate = new Date(startDate);
   let cycle = 0;
   let reachedAt = null;
@@ -829,11 +911,42 @@ function simulateProduction(payload) {
   return { rows, summary };
 }
 
+/** Handler ของหน้าจำลอง standalone — parse payload (รับค่าจากผู้ใช้ทับค่า default ของระบบได้ทุกช่อง) แล้วเรียก runProductionCycles() */
+function simulateProduction(payload) {
+  if (!payload.initial_pieces || Number(payload.initial_pieces) <= 0) {
+    throw new Error("กรุณาใส่จำนวนชิ้นตั้งต้น");
+  }
+  const targetDate = payload.target_date ? new Date(payload.target_date) : null;
+  const targetPlants = (payload.target_plants !== undefined && payload.target_plants !== "")
+    ? Number(payload.target_plants) : null;
+  if (!targetDate && targetPlants === null) {
+    throw new Error("กรุณาระบุวันที่ต้องการเนื้อเยื่อหรือจำนวนต้นเป้าหมายอย่างน้อยหนึ่งอย่าง");
+  }
+
+  const cfg = getSystemConfig();
+  const startDate = payload.start_date ? new Date(payload.start_date) : new Date();
+
+  return runProductionCycles({
+    initialPieces: Number(payload.initial_pieces),
+    startDate,
+    targetDate,
+    targetPlants,
+    cycleDays: Number(payload.cycle_days) || cfg.cycle_days,
+    ssBottleLimit: Number(payload.ss_bottle_limit) || cfg.ss_bottle_limit,
+    ssPiecesPerBottle: Number(payload.ss_pieces_per_bottle) || cfg.ss_pieces_per_bottle,
+    ssMultiplier: Number(payload.ss_multiplication_factor) || cfg.ss_multiplication_factor,
+    tibBottleLimit: Number(payload.tib_bottle_limit) || cfg.tib_bottle_limit,
+    tibPiecesPerBottle: Number(payload.tib_pieces_per_bottle) || cfg.tib_pieces_per_bottle,
+    tibMultiplier: Number(payload.tib_multiplication_factor) || cfg.tib_multiplication_factor,
+    rootingRate: (payload.rooting_rate !== undefined && payload.rooting_rate !== "") ? Number(payload.rooting_rate) : 1,
+    acclimatizationRate: (payload.acclimatization_rate !== undefined && payload.acclimatization_rate !== "") ? Number(payload.acclimatization_rate) : 1,
+  });
+}
+
 /**
- * พยากรณ์จำนวนต้นของล็อตหนึ่ง ณ วันที่ targetDate ที่ต้องการ
- * จำลองล่วงหน้าทีละรอบโดยใช้ stage1_days/stage2_days ของชนิดพืชเพื่อรู้ว่ารอบถัดไปจะเกิดวันไหน
- * คูณด้วยตัวคูณการขยาย (เฉพาะตอนยังอยู่ระยะ "ขยาย") ทุกรอบที่เกิดขึ้นจริงก่อนหรือเท่ากับ targetDate
- * เมื่อเลยระยะขยายไปแล้ว (กระตุ้นราก/พร้อมออกปลูก) ไม่มีการคูณอีก ใช้เวลาเฉยๆ จนจบการจำลอง
+ * พยากรณ์จำนวนต้นของล็อตหนึ่ง ณ วันที่ targetDate ที่ต้องการ โดยใช้ตัวคูณการขยายต่อชนิดพืช (stage1_multiplier_tib/ss)
+ * ปัจจุบัน computeDashboardData ไม่ได้เรียกฟังก์ชันนี้แล้ว (เปลี่ยนไปใช้ runProductionCycles แบบจำลอง SS/TIB แทน)
+ * เก็บไว้เผื่อใช้งานในอนาคต — ฟิลด์ตัวคูณการขยายในหน้าตั้งค่ายังกรอก/แก้ได้ตามปกติ แค่ไม่ถูกใช้คำนวณ Dashboard แล้ว
  */
 function predictQuantityForLot(lot, plant, targetDate) {
   let quantity = Number(lot.quantity || 0);

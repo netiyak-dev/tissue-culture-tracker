@@ -112,6 +112,27 @@ const TABLE_COLUMNS = [
 
 document.getElementById("start-date").valueAsDate = new Date();
 
+const SYSTEM_FIELD_IDS = {
+  cycle_days: "cycle-days",
+  ss_bottle_limit: "ss-bottle-limit",
+  ss_pieces_per_bottle: "ss-pieces-per-bottle",
+  ss_multiplication_factor: "ss-multiplier",
+  tib_bottle_limit: "tib-bottle-limit",
+  tib_pieces_per_bottle: "tib-pieces-per-bottle",
+  tib_multiplication_factor: "tib-multiplier",
+};
+
+async function loadSystemDefaults() {
+  try {
+    const cfg = await TissueApp.call("getSystemSettings");
+    Object.keys(SYSTEM_FIELD_IDS).forEach(key => {
+      document.getElementById(SYSTEM_FIELD_IDS[key]).value = cfg[key];
+    });
+  } catch (err) {
+    console.warn("โหลดค่าเริ่มต้นระบบ SS/TIB ไม่สำเร็จ ใช้ค่า default ในหน้านี้แทน:", err);
+  }
+}
+
 document.getElementById("simulate-btn").addEventListener("click", async () => {
   const initialPieces = document.getElementById("initial-pieces").value;
   const targetDate = document.getElementById("target-date").value;
@@ -170,6 +191,7 @@ function renderResult(result) {
 
 (async () => {
   await TissueApp.init();
+  await loadSystemDefaults();
 })();
 </script>
 </body>
