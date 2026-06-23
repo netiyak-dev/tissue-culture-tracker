@@ -50,6 +50,7 @@
         <label>วันที่อยากได้เนื้อเยื่อ (ไม่บังคับ)</label>
         <input type="date" id="target-date-input" />
       </div>
+      <div id="expected-totals" style="margin-bottom:12px;"></div>
       <div id="plant-overview"></div>
     </div>
   </div>
@@ -58,6 +59,9 @@
 
 <script src="../liff-app/js/api.js"></script>
 <script>
+let lastByPlant = []; // จำผลล่าสุดของ by_plant ไว้ เพื่อคำนวณสถานะ "ทันตามเป้า" ใหม่ได้ทันทีตอนพิมพ์จำนวนที่ต้องการ ไม่ต้องโหลดซ้ำ
+const expectedByPlant = {}; // plant_name -> จำนวนที่ต้องการที่ผู้ใช้กรอกสด (เก็บไว้ในหน้านี้เท่านั้น ไม่บันทึกลงระบบ)
+
 function formatThaiDateClient(isoDateStr) {
   const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   const d = new Date(isoDateStr + "T00:00:00");
@@ -128,6 +132,63 @@ function renderMembers(data) {
   }).join("");
 }
 
+function evaluateStatus(predicted, expected) {
+  if (expected === undefined || expected === "" || isNaN(Number(expected))) return "";
+  if (predicted === undefined) return "";
+  const ok = predicted >= Number(expected);
+  const color = ok ? "var(--leaf)" : "var(--alert)";
+  return `<div class="muted" style="margin-top:4px;font-weight:600;color:${color};">${ok ? "ทันตามเป้า ✓" : "ไม่ทันตามเป้า ✕"}</div>`;
+}
+
+function renderTotals() {
+  lastByPlant.forEach((p, idx) => {
+    const statusEl = document.querySelector(`[data-status="${idx}"]`);
+    if (statusEl) statusEl.innerHTML = evaluateStatus(p.predicted_total, expectedByPlant[p.plant_name]);
+  });
+
+  let sumExpected = 0, sumPredicted = 0, any = false;
+  lastByPlant.forEach(p => {
+    const exp = expectedByPlant[p.plant_name];
+    if (exp !== undefined && exp !== "" && !isNaN(Number(exp)) && p.predicted_total !== undefined) {
+      sumExpected += Number(exp);
+      sumPredicted += p.predicted_total;
+      any = true;
+    }
+  });
+  const totalsEl = document.getElementById("expected-totals");
+  if (!any) { totalsEl.innerHTML = ""; return; }
+  const ok = sumPredicted >= sumExpected;
+  const color = ok ? "var(--leaf)" : "var(--alert)";
+  totalsEl.innerHTML = `<div class="card muted" style="font-weight:600;color:${color};">รวมที่ต้องการ ${sumExpected} ต้น · พยากรณ์ได้รวม ${sumPredicted} ต้น — ${ok ? "ทันตามเป้า ✓" : "ไม่ทันตามเป้า ✕"}</div>`;
+}
+
+function renderPlantOverview(targetDateVal) {
+  const plantOverview = document.getElementById("plant-overview");
+  plantOverview.innerHTML = lastByPlant.map((p, idx) => `
+    <div class="card">
+      <h3>${p.plant_name} <span class="muted">· ${p.total} ล็อต</span></h3>
+      ${stageStepper(p.dominant_stage)}
+      <div class="muted">ขยาย ${p.stage_counts.ขยาย} ต้น · กระตุ้นราก ${p.stage_counts.กระตุ้นราก} ต้น · พร้อมออกปลูก ${p.stage_counts.พร้อมออกปลูก} ต้น</div>
+      ${p.predicted_total !== undefined ? `<div class="muted" style="margin-top:6px;color:var(--forest);font-weight:600;">พยากรณ์ ณ ${formatThaiDateClient(targetDateVal)}: ${p.predicted_total} ต้น</div>` : ""}
+      <div class="field" style="margin-top:8px;margin-bottom:0;">
+        <label>จำนวนที่ต้องการ (ไม่บังคับ)</label>
+        <input type="number" class="expected-input" data-idx="${idx}" min="0" inputmode="numeric" value="${expectedByPlant[p.plant_name] || ""}" placeholder="เช่น 100" />
+      </div>
+      <div data-status="${idx}"></div>
+    </div>
+  `).join("") || '<p class="muted">ยังไม่มีข้อมูล</p>';
+  renderTotals();
+}
+
+document.getElementById("plant-overview").addEventListener("input", (e) => {
+  if (!e.target.classList.contains("expected-input")) return;
+  const idx = Number(e.target.dataset.idx);
+  const plant = lastByPlant[idx];
+  if (!plant) return;
+  expectedByPlant[plant.plant_name] = e.target.value;
+  renderTotals();
+});
+
 async function loadDashboard(viewLab) {
   try {
     const targetDateVal = document.getElementById("target-date-input").value;
@@ -169,15 +230,8 @@ async function loadDashboard(viewLab) {
     }
 
     // ภาพรวมตามชนิดพืช
-    const plantOverview = document.getElementById("plant-overview");
-    plantOverview.innerHTML = data.by_plant.map(p => `
-      <div class="card">
-        <h3>${p.plant_name} <span class="muted">· ${p.total} ล็อต</span></h3>
-        ${stageStepper(p.dominant_stage)}
-        <div class="muted">ขยาย ${p.stage_counts.ขยาย} ต้น · กระตุ้นราก ${p.stage_counts.กระตุ้นราก} ต้น · พร้อมออกปลูก ${p.stage_counts.พร้อมออกปลูก} ต้น</div>
-        ${p.predicted_total !== undefined ? `<div class="muted" style="margin-top:6px;color:var(--forest);font-weight:600;">พยากรณ์ ณ ${formatThaiDateClient(targetDateVal)}: ${p.predicted_total} ต้น</div>` : ""}
-      </div>
-    `).join("") || '<p class="muted">ยังไม่มีข้อมูล</p>';
+    lastByPlant = data.by_plant;
+    renderPlantOverview(targetDateVal);
 
     // ภาพรวมที่เก็บ
     const storageEl = document.getElementById("storage-overview");
