@@ -70,18 +70,11 @@
     <input type="number" id="tib-multiplier" min="0" step="0.1" value="20" />
   </div>
 
-  <h2 style="margin-top:20px;">อัตรานำไปกระตุ้นราก / อัตรารอด</h2>
+  <h2 style="margin-top:20px;">อัตรารอด</h2>
+  <p class="muted">ส่วนที่เกินความจุของระบบ SS/TIB ในแต่ละรอบ (ลงระบบเต็มแล้ว ไม่มีที่ลงต่อ) จะถูกนำออกไปกระตุ้นรากให้อัตโนมัติ ไม่ต้องตั้งอัตราเอง</p>
   <div class="field">
-    <label>อัตรานำไปกระตุ้นราก (%) — สัดส่วนของรอบนี้ที่หยิบออกจากวงจรขยายไปกระตุ้นราก</label>
-    <input type="number" id="rooting-rate" min="0" max="100" value="100" />
-  </div>
-  <div class="field">
-    <label>อัตรารอดหลังออกปลูก (%) — สัดส่วนของที่หยิบออกไปแล้วที่รอดจริงจนเป็นต้นพร้อมส่งมอบ</label>
+    <label>อัตรารอดหลังออกปลูก (%) — สัดส่วนของส่วนเกินที่นำออกไปแล้วที่รอดจริงจนเป็นต้นพร้อมส่งมอบ</label>
     <input type="number" id="acclimatization-rate" min="0" max="100" value="100" />
-  </div>
-  <div class="field">
-    <label>เกณฑ์ขั้นต่ำก่อนเริ่มกระตุ้นราก (ชิ้น) — ต้องมีจำนวนชิ้นปลายรอบเกินเท่านี้ก่อน ถึงจะเริ่มหยิบออกไปกระตุ้นราก</label>
-    <input type="number" id="rooting-threshold" min="0" value="50000" />
   </div>
 
   <button id="simulate-btn" class="btn btn-primary btn-block">จำลอง</button>
@@ -109,9 +102,8 @@ const TABLE_COLUMNS = [
   ["tib_bottles", "ขวด TIB"],
   ["tib_loaded_pieces", "ชิ้นเข้า TIB"],
   ["tib_output_pieces", "ผลผลิต TIB"],
-  ["leftover_pieces", "เหลือค้าง"],
+  ["leftover_pieces", "ส่วนเกิน (นำไปกระตุ้นราก)"],
   ["total_pieces_after_cycle", "รวมปลายรอบ"],
-  ["sent_to_rooting_pieces", "นำไปกระตุ้นราก (รอบนี้)"],
   ["ready_for_planting_pieces", "พร้อมออกปลูก (รอบนี้)"],
   ["ready_for_planting_cumulative", "พร้อมออกปลูกสะสม"],
 ];
@@ -157,9 +149,7 @@ document.getElementById("simulate-btn").addEventListener("click", async () => {
     tib_bottle_limit: Number(document.getElementById("tib-bottle-limit").value),
     tib_pieces_per_bottle: Number(document.getElementById("tib-pieces-per-bottle").value),
     tib_multiplication_factor: Number(document.getElementById("tib-multiplier").value),
-    rooting_rate: Number(document.getElementById("rooting-rate").value) / 100,
     acclimatization_rate: Number(document.getElementById("acclimatization-rate").value) / 100,
-    rooting_threshold_pieces: Number(document.getElementById("rooting-threshold").value) || 0,
   };
   if (targetDate) payload.target_date = targetDate;
   if (targetPlants) payload.target_plants = Number(targetPlants);

@@ -621,10 +621,10 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
     };
   });
 
-  // ใช้แบบจำลองรอบการผลิตเดียวกับหน้า "จำลองรอบการผลิต" คำนวณพยากรณ์อัตโนมัติ — ไม่ใช้ตัวคูณการขยายต่อชนิดพืชอีกต่อไป
-  // เริ่มจาก TODAY() เสมอ (ไม่ใช่ next_transfer_date ของล็อต) และนับเฉพาะ "ต้น" ที่ยังอยู่ระยะขยายเป็นชิ้นตั้งต้น
-  // ตั้ง rootingRate/acclimatizationRate = 0 (ไม่หัก "พร้อมออกปลูก" ออกเลยทุกรอบ) เพื่อให้ทุกชิ้นวนขยายต่อแบบทบต้นล้วนๆ
-  // ไม่ตัดออกไปกลางทาง — ต่างจากหน้าจำลอง standalone ที่ผู้ใช้ตั้งอัตรารอด > 0 ได้เพื่อจำลองการหักออกปลูกจริง
+  // คำนวณพยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard — เริ่มจาก TODAY() เสมอ (ไม่ใช่ next_transfer_date ของล็อต)
+  // และนับเฉพาะ "ต้น" ที่ยังอยู่ระยะขยายเป็นชิ้นตั้งต้น ไม่ใช้ตัวคูณการขยายต่อชนิดพืชอีกต่อไป
+  // ไม่เรียก runProductionCycles() เพราะฟังก์ชันนั้นตัดส่วนเกินความจุ SS/TIB ออกไปกระตุ้นรากทุกรอบที่ชิ้นเกินความจุ —
+  // พยากรณ์ของ Dashboard ต้องการทบต้นแบบไม่จำกัดความจุล้วนๆ จึงคำนวณตรงด้วยตัวคูณถ่วงน้ำหนักตามสัดส่วนความจุ SS:TIB แทน
   const sysConfig = targetDate ? getSystemConfig() : null;
   const by_plant = plants.filter(p => p.active !== false).map(p => {
     const lots = activeLots.filter(t => t.plant_id === p.plant_id);
@@ -636,23 +636,15 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
     if (targetDate && sysConfig) {
       const initialPieces = stage_counts["ขยาย"];
       if (initialPieces > 0) {
-        const sim = runProductionCycles({
-          initialPieces,
-          startDate: now,
-          targetDate,
-          targetPlants: null,
-          cycleDays: sysConfig.cycle_days,
-          ssBottleLimit: sysConfig.ss_bottle_limit,
-          ssPiecesPerBottle: sysConfig.ss_pieces_per_bottle,
-          ssMultiplier: sysConfig.ss_multiplication_factor,
-          tibBottleLimit: sysConfig.tib_bottle_limit,
-          tibPiecesPerBottle: sysConfig.tib_pieces_per_bottle,
-          tibMultiplier: sysConfig.tib_multiplication_factor,
-          rootingRate: 0,
-          acclimatizationRate: 0,
-        });
-        const lastRow = sim.rows[sim.rows.length - 1];
-        result.predicted_total = lastRow ? lastRow.total_pieces_after_cycle : initialPieces;
+        const ssCapacity = sysConfig.ss_bottle_limit * sysConfig.ss_pieces_per_bottle;
+        const tibCapacity = sysConfig.tib_bottle_limit * sysConfig.tib_pieces_per_bottle;
+        const combinedCapacity = ssCapacity + tibCapacity;
+        const ssShareRatio = combinedCapacity > 0 ? ssCapacity / combinedCapacity : 0;
+        const tibShareRatio = combinedCapacity > 0 ? tibCapacity / combinedCapacity : 0;
+        const blendedMultiplier = ssShareRatio * sysConfig.ss_multiplication_factor + tibShareRatio * sysConfig.tib_multiplication_factor;
+        const daysDiff = (targetDate - now) / (24 * 60 * 60 * 1000);
+        const numCycles = Math.max(0, Math.floor(daysDiff / sysConfig.cycle_days) + 1);
+        result.predicted_total = Math.round(initialPieces * Math.pow(blendedMultiplier, numCycles));
       } else {
         result.predicted_total = 0;
       }
@@ -824,26 +816,23 @@ function saveSystemSettings(payload) {
 
 /**
  * จำลองการผลิตเนื้อเยื่อพืชแบบรอบการผลิต (ทุก cycleDays วัน) จนถึง targetDate หรือจนกว่ายอดสะสม "พร้อมออกปลูก" จะถึง targetPlants
- * แต่ละรอบ: แบ่งจำนวนชิ้นตั้งต้นเข้าระบบ SS/TIB ตามสัดส่วนความจุของแต่ละระบบ ส่วนที่เกินความจุรวมเก็บเป็น "เหลือค้าง" (ไม่คูณ)
- * ส่วนที่โหลดเข้าได้คูณด้วยตัวคูณของระบบนั้น รวมเป็นจำนวนชิ้นปลายรอบ — จากนั้น:
- *   1. ถ้าจำนวนชิ้นปลายรอบเกิน rootingThresholdPieces (เกณฑ์ขั้นต่ำก่อนเริ่มกระตุ้นราก) เท่านั้น ถึงจะหยิบส่วนที่ "นำไปกระตุ้นราก" ออกจากวงจรขยายจริงตาม
- *      rootingRate (= ปลายรอบ × rootingRate) — ถ้ายังไม่เกินเกณฑ์ ไม่หยิบออกเลยในรอบนี้ (เท่ากับ rootingRate = 0 ชั่วคราว) ปล่อยให้ขยายทบต้นต่อไปก่อน
- *      ส่วนที่หยิบออกไปนี้ไม่วนกลับมาขยายต่ออีกไม่ว่าจะรอดหรือไม่
- *   2. การกระตุ้นรากใช้เวลา 1 รอบการผลิต — ของที่หยิบออกไปในรอบ N จะยังไม่กลายเป็น "พร้อมออกปลูก" ในรอบ N ทันที แต่ไปโผล่ในรอบ N+1
- *      โดยคูณด้วย acclimatizationRate ตอนนั้น (ส่วนที่ไม่รอดถือว่าสูญไปเลย ไม่กลับเข้าวงจรขยาย)
- *   3. ส่วนที่เหลือ (ปลายรอบ − ที่หยิบออกไปกระตุ้นรากรอบนี้) เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบถัดไป
+ * แต่ละรอบ: แบ่งจำนวนชิ้นตั้งต้นเข้าระบบ SS/TIB ตามสัดส่วนความจุของแต่ละระบบ ส่วนที่เกินความจุรวม (ระบบเต็มแล้ว ไม่มีที่ลงต่อ) ถือเป็น
+ * "ส่วนเกิน" ที่ถูกนำออกไปกระตุ้นรากทันที — ไม่มีอัตรา/เกณฑ์ขั้นต่ำให้ตั้งเองอีกต่อไป ความจุของระบบ SS/TIB เป็นตัวกำหนดเองโดยอัตโนมัติ
+ * ส่วนที่โหลดเข้า SS/TIB ได้ คูณด้วยตัวคูณของระบบนั้น แล้ววนกลับเป็นชิ้นตั้งต้นของรอบถัดไป (เฉพาะผลผลิตที่คูณแล้วเท่านั้นที่วนต่อ) จากนั้น:
+ *   1. ส่วนเกินของรอบนี้ (ที่ไม่มีที่ลง SS/TIB) การกระตุ้นรากใช้เวลา 1 รอบการผลิต — ของที่ถูกนำออกไปในรอบ N จะยังไม่กลายเป็น "พร้อมออกปลูก"
+ *      ในรอบ N ทันที แต่ไปโผล่ในรอบ N+1 โดยคูณด้วย acclimatizationRate ตอนนั้น (ส่วนที่ไม่รอดถือว่าสูญไปเลย ไม่กลับเข้าวงจรขยาย)
+ *   2. ผลผลิตจาก SS/TIB ที่คูณแล้ว (ไม่ใช่ส่วนเกิน) เท่านั้นที่วนไปเป็นชิ้นตั้งต้นของรอบถัดไป
  * สะสมยอด "พร้อมออกปลูก" ของทุกรอบไว้เทียบกับ targetPlants
- * แยกเป็นฟังก์ชันกลาง (รับค่าที่ parse แล้วเท่านั้น ไม่แตะ payload ตรงๆ) เพื่อให้ simulateProduction() (หน้าจำลอง standalone)
- * และ computeDashboardData() (พยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard, ตั้ง rootingRate = 0 เพื่อไม่หยิบอะไรออก ขยายทบต้นล้วนๆ — ไม่กระทบจาก threshold/delay นี้) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
+ * แยกเป็นฟังก์ชันกลาง (รับค่าที่ parse แล้วเท่านั้น ไม่แตะ payload ตรงๆ) ใช้โดย simulateProduction() (หน้าจำลอง standalone) เท่านั้น
+ * — computeDashboardData() ไม่เรียกฟังก์ชันนี้ (พยากรณ์อัตโนมัติของ Dashboard ต้องการขยายทบต้นแบบไม่จำกัดความจุ จึงคำนวณตรงด้วยตัวคูณถ่วงน้ำหนักแยกเอง)
  */
 function runProductionCycles(params) {
   const {
     initialPieces, startDate, targetDate, targetPlants, cycleDays,
     ssBottleLimit, ssPiecesPerBottle, ssMultiplier,
     tibBottleLimit, tibPiecesPerBottle, tibMultiplier,
-    rootingRate, acclimatizationRate, rootingThresholdPieces,
+    acclimatizationRate,
   } = params;
-  const threshold = rootingThresholdPieces || 0;
 
   const ssCapacity = ssBottleLimit * ssPiecesPerBottle;
   const tibCapacity = tibBottleLimit * tibPiecesPerBottle;
@@ -873,13 +862,12 @@ function runProductionCycles(params) {
     const tibBottlesUsed = tibPiecesPerBottle > 0 ? Math.ceil(tibLoaded / tibPiecesPerBottle) : 0;
     const ssOutput = ssLoaded * ssMultiplier;
     const tibOutput = tibLoaded * tibMultiplier;
+    // leftover = ส่วนเกินที่ไม่มีที่ลง SS/TIB เพราะระบบเต็มแล้ว (เป็น 0 เสมอถ้าชิ้นตั้งต้นยังไม่เกินความจุรวม) — ถูกนำออกไปกระตุ้นรากทันที ไม่วนกลับเข้าลูป
     const leftover = inputPieces - ssLoaded - tibLoaded;
     const grossOutput = ssOutput + tibOutput;
     const totalAfterCycle = leftover + grossOutput;
-    // rootingRate = อัตรา "นำไปกระตุ้นราก" คือสัดส่วนของรอบนี้ที่ถูกหยิบออกจากวงจรขยายไปเข้าระยะกระตุ้นราก (ออกจากลูปเลย ไม่ว่าจะรอดหรือไม่)
-    // เริ่มหยิบออกได้ก็ต่อเมื่อปลายรอบเกิน threshold เท่านั้น (ยังไม่เกิน = ปล่อยขยายทบต้นต่อ ไม่หยิบออกเลย)
-    const sentToRooting = totalAfterCycle > threshold ? totalAfterCycle * rootingRate : 0;
-    const carriedForward = totalAfterCycle - sentToRooting;
+    const sentToRooting = leftover;
+    const carriedForward = grossOutput; // เฉพาะผลผลิตที่คูณจาก SS/TIB เท่านั้นที่วนเป็นชิ้นตั้งต้นรอบหน้า ส่วนเกินไม่กลับมาขยายอีก
     // acclimatizationRate = อัตรา "รอดหลังออกปลูก" — ใช้แปลง pendingRooting ของรอบที่แล้ว (ไม่ใช่ sentToRooting ของรอบนี้) เพราะกระตุ้นรากใช้เวลา 1 รอบ
     const readyForPlanting = pendingRooting * acclimatizationRate;
     cumulativeReady += readyForPlanting;
@@ -901,7 +889,6 @@ function runProductionCycles(params) {
       leftover_pieces: Math.round(leftover),
       gross_output_pieces: Math.round(grossOutput),
       total_pieces_after_cycle: Math.round(totalAfterCycle),
-      sent_to_rooting_pieces: Math.round(sentToRooting),
       ready_for_planting_pieces: Math.round(readyForPlanting),
       ready_for_planting_cumulative: Math.round(cumulativeReady),
     });
@@ -960,9 +947,7 @@ function simulateProduction(payload) {
     tibBottleLimit: Number(payload.tib_bottle_limit) || cfg.tib_bottle_limit,
     tibPiecesPerBottle: Number(payload.tib_pieces_per_bottle) || cfg.tib_pieces_per_bottle,
     tibMultiplier: Number(payload.tib_multiplication_factor) || cfg.tib_multiplication_factor,
-    rootingRate: (payload.rooting_rate !== undefined && payload.rooting_rate !== "") ? Number(payload.rooting_rate) : 1,
     acclimatizationRate: (payload.acclimatization_rate !== undefined && payload.acclimatization_rate !== "") ? Number(payload.acclimatization_rate) : 1,
-    rootingThresholdPieces: (payload.rooting_threshold_pieces !== undefined && payload.rooting_threshold_pieces !== "") ? Number(payload.rooting_threshold_pieces) : 0,
   });
 }
 
