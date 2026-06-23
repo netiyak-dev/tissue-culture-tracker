@@ -38,6 +38,9 @@ const TissueApp = {
               });
               this.myRole = result.role || "user";
               this.myLab = result.lab || "";
+              if (result.approved === false) {
+                await this._waitForApproval();
+              }
               if (!this.myLab) {
                 this.myLab = await this._askMyLab();
               }
@@ -87,6 +90,44 @@ const TissueApp = {
         grid.appendChild(chip);
       });
       document.body.appendChild(overlay);
+    });
+  },
+
+  /** หน้าจอบังคับรอแอดมินอนุมัติ ก่อนจะเลือก Lab/ใช้งานอะไรได้ — ปุ่ม "ตรวจสอบอีกครั้ง" เรียกเช็คสถานะซ้ำเอง ไม่ auto-poll พื้นหลัง */
+  _waitForApproval() {
+    return new Promise(resolve => {
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;";
+      overlay.innerHTML = `
+        <div style="width:100%;max-width:380px;text-align:center;">
+          <h1 style="margin-bottom:8px;">รอแอดมินอนุมัติ</h1>
+          <p class="muted" style="margin-bottom:20px;">บัญชีของคุณเปิดใช้งานแล้ว แต่ยังต้องรอแอดมินอนุมัติก่อนเริ่มใช้งานได้ แจ้งแอดมินแล้วกดตรวจสอบอีกครั้ง</p>
+          <button class="btn btn-primary btn-block" id="approval-retry-btn">ตรวจสอบอีกครั้ง</button>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      const retryBtn = overlay.querySelector("#approval-retry-btn");
+      retryBtn.addEventListener("click", async () => {
+        this.setLoading(retryBtn, true, "กำลังตรวจสอบ...");
+        try {
+          const result = await this.call("registerLineUser", {
+            line_user_id: this.profile.userId,
+            display_name: this.profile.displayName,
+          });
+          this.myRole = result.role || "user";
+          this.myLab = result.lab || "";
+          if (result.approved === false) {
+            this.setLoading(retryBtn, false);
+            alert("ยังไม่ได้รับอนุมัติ กรุณาลองใหม่อีกครั้งหลังแอดมินอนุมัติแล้ว");
+            return;
+          }
+          overlay.remove();
+          resolve();
+        } catch (err) {
+          this.setLoading(retryBtn, false);
+          alert("ตรวจสอบไม่สำเร็จ: " + err.message);
+        }
+      });
     });
   },
 

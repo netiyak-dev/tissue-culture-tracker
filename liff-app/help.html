@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>วิธีใช้งาน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/style.css" />
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+<div class="screen">
+
+  <div class="topbar">
+    <a href="index.html" class="back-btn">‹</a>
+    <h1>วิธีใช้งาน</h1>
+    <span class="lab-badge hidden" id="lab-badge"></span>
+  </div>
+
+  <div class="card">
+    <h2>ภาพรวมระบบ</h2>
+    <p>ระบบนี้ช่วยจำแทนคุณว่าขวดไหนถึงรอบถ่ายโอนเมื่อไหร่ ต้องใช้สูตรอาหารอะไร ใช้งานหลักๆ 3 อย่าง:</p>
+    <p class="muted">1. บันทึกถ่ายโอนเนื้อเยื่อ → 2. ดูสรุปข้อมูล/ประวัติย้อนหลัง → 3. รับแจ้งเตือนทาง Line อัตโนมัติ</p>
+  </div>
+
+  <div class="card">
+    <h2>ขั้นตอนบันทึกการถ่ายโอน</h2>
+    <p class="muted">จากหน้าหลัก แตะชนิดพืชที่จะบันทึก แล้วกรอกทีละขั้น:</p>
+    <p>1. เลือกหมายเลขล็อต — พิมพ์เลขล็อตใหม่ หรือเลือกล็อตที่กำลังติดตามอยู่<br>
+    2. จำนวนต้นที่ทำได้<br>
+    3. ประเภทรอบนี้ TIB (อาหารเหลว) หรือ SS (กึ่งแข็ง) — ถ้าเลือก TIB ต้องกรอกหมายเลขขวดด้วย<br>
+    4. ชั้นเก็บ + ช่องเก็บของรอบนี้ แล้วกด "บันทึก"</p>
+    <p class="muted">ระยะ (ขยาย / กระตุ้นราก / พร้อมออกปลูก), รอบถัดไป, และสูตรอาหารที่ต้องใช้ ระบบคำนวณให้อัตโนมัติทุกครั้งที่บันทึก ไม่ต้องจำเอง</p>
+  </div>
+
+  <div class="card">
+    <h2>Lab, Admin และ User</h2>
+    <p>ทีมงานแบ่งเป็น 3 ห้อง Lab: <strong>KA</strong> / <strong>NJ</strong> / <strong>CC</strong> — ข้อมูลการถ่ายโอนของแต่ละ Lab แยกจากกันสมบูรณ์</p>
+    <p class="muted"><strong>Admin</strong> เห็น/จัดการข้อมูลได้ทุก Lab และตั้งสิทธิ์ผู้ใช้คนอื่นได้<br>
+    <strong>User</strong> เห็นเฉพาะข้อมูลของ Lab ตัวเอง</p>
+    <p>เปิดแอปครั้งแรกผ่าน Line: ต้องรอแอดมินอนุมัติก่อนเสมอ (ขึ้นข้อความ "รอแอดมินอนุมัติ") หลังอนุมัติแล้วจะมีปุ่มให้เลือก Lab ของตัวเอง — เลือกได้ครั้งเดียว ถ้าเลือกผิดต้องแจ้งแอดมินให้เปลี่ยนให้ที่หน้า "ตั้งค่า" → "สิทธิ์ผู้ใช้"</p>
+  </div>
+
+  <div class="card">
+    <h2>ดูสรุปข้อมูลและประวัติ</h2>
+    <p>ปุ่ม "📊 ดูสรุปข้อมูล" (Dashboard) — ดูจำนวนล็อตทั้งหมด ล็อตที่ใกล้ถึงกำหนด ภาพรวมตามชนิดพืชและที่เก็บ Admin เลือกดูเฉพาะ Lab เดียวหรือรวมทุก Lab ได้ และดูได้ว่าใครอยู่ Lab ไหนบ้าง</p>
+    <p>ปุ่ม "📜 ดูประวัติการถ่ายโอน" — ไล่ดูทุกรอบของล็อตที่เลือก ตั้งแต่รอบแรกจนถึงปัจจุบัน พร้อมวันที่ ตำแหน่งเก็บ และผู้บันทึกของแต่ละรอบ</p>
+  </div>
+
+  <div class="card">
+    <h2>การแจ้งเตือนทาง Line</h2>
+    <p>บันทึกสำเร็จ → ได้รับแจ้งเตือนทันที (ผู้บันทึกเอง + แอดมินทุกคน)</p>
+    <p class="muted">ทุกเช้า → ระบบสรุปล็อตที่ถึงกำหนดถ่ายโอนวันนี้/พรุ่งนี้ส่งให้อัตโนมัติ แยกตาม Lab (แอดมินได้สรุปรวมทุก Lab)</p>
+  </div>
+
+</div>
+
+<script src="js/api.js"></script>
+<script>
+(async () => {
+  await TissueApp.init();
+  const badge = document.getElementById("lab-badge");
+  badge.textContent = TissueApp.isAdmin() ? "ทุก Lab" : "Lab " + TissueApp.myLab;
+  badge.classList.remove("hidden");
+})();
+</script>
+</body>
+</html>

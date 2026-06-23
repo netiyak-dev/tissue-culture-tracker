@@ -40,7 +40,7 @@
 
   <!-- แท็บ 3: สิทธิ์ผู้ใช้ (แอดมินเท่านั้น) -->
   <div class="tab-panel" id="panel-permissions">
-    <p class="muted">รายชื่อคนที่เปิดแอปนี้ผ่าน Line แล้ว — ตั้ง Lab และสิทธิ์ได้ที่นี่ Admin จะเห็นข้อมูลทุก Lab และได้รับแจ้งเตือนทุกครั้งที่มีการบันทึก ส่วน User เห็นเฉพาะ Lab ของตัวเอง</p>
+    <p class="muted">รายชื่อคนที่เปิดแอปนี้ผ่าน Line แล้ว — ตั้ง Lab และสิทธิ์ได้ที่นี่ Admin จะเห็นข้อมูลทุก Lab และได้รับแจ้งเตือนทุกครั้งที่มีการบันทึก ส่วน User เห็นเฉพาะ Lab ของตัวเอง คนที่เพิ่งเปิดแอปครั้งแรกจะมีสถานะ "รออนุมัติ" ต้องกดอนุมัติ (หรือเลือก Lab ให้) ก่อนถึงจะเริ่มใช้งานได้</p>
     <div id="permissions-list"></div>
   </div>
 
@@ -270,13 +270,28 @@ async function loadPermissionsSettings() {
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `
-      <div class="plant-name">${u.display_name} ${u.active ? "" : '<span class="muted">(ปิดใช้งาน)</span>'}</div>
+      <div class="plant-name">${u.display_name} ${u.active ? "" : '<span class="muted">(ปิดใช้งาน)</span>'} ${u.approved ? "" : '<span class="muted" style="color:var(--alert);">(รออนุมัติ)</span>'}</div>
+      ${u.approved ? "" : '<button class="btn btn-outline btn-block" style="margin-top:10px;" data-approve="' + u.line_user_id + '">อนุมัติให้เข้าใช้งาน</button>'}
       <div class="muted" style="margin:6px 0 4px;">Lab</div>
       <div class="chip-grid lab-grid" style="grid-template-columns:repeat(3,1fr);"></div>
       <div class="muted" style="margin:10px 0 4px;">สิทธิ์</div>
       <div class="chip-grid role-grid" style="grid-template-columns:repeat(2,1fr);"></div>
       <div class="muted" style="margin-top:10px;word-break:break-all;cursor:pointer;border:1px dashed var(--border);border-radius:8px;padding:6px 8px;" data-line-id="${u.line_user_id}">${u.line_user_id}</div>
     `;
+
+    const approveBtn = card.querySelector("[data-approve]");
+    if (approveBtn) {
+      approveBtn.addEventListener("click", async () => {
+        TissueApp.setLoading(approveBtn, true, "กำลังอนุมัติ...");
+        try {
+          await TissueApp.call("setUserPermissions", { target_line_user_id: u.line_user_id, approved: true });
+          await loadPermissionsSettings();
+        } catch (err) {
+          alert("อนุมัติไม่สำเร็จ: " + err.message);
+          TissueApp.setLoading(approveBtn, false);
+        }
+      });
+    }
 
     const labGrid = card.querySelector(".lab-grid");
     LABS.forEach(lab => {

@@ -43,7 +43,7 @@ const SHEET_SCHEMAS = {
     "media_type", "bottle_no", "shelf", "sub_shelf",
     "stage", "recipe_used", "next_transfer_date", "recorded_by", "created_at",
   ],
-  LineUsers: ["line_user_id", "display_name", "role", "lab", "active"],
+  LineUsers: ["line_user_id", "display_name", "role", "lab", "active", "approved"],
 };
 
 /** รันครั้งเดียวตอนติดตั้งระบบครั้งแรก: สร้างชีต + หัวคอลัมน์ (ไม่ลบของเดิมถ้ามีอยู่แล้ว) */
@@ -157,20 +157,31 @@ function findLineUser(line_user_id) {
 }
 
 /**
+ * แอดมินอนุมัติแล้วหรือยัง — ถือว่าอนุมัติอัตโนมัติถ้าเป็น role admin หรือมี lab ตั้งไว้แล้ว
+ * (กันคนที่ใช้งานอยู่ก่อนฟีเจอร์อนุมัติจะมาถูกบล็อกย้อนหลัง เพราะแค่มี lab ก็แปลว่าเคยผ่านขั้นนี้มาแล้วจริง)
+ */
+function isUserApproved(row) {
+  return row.role === "admin" || row.approved === true || !!row.lab;
+}
+
+/**
  * ดึงข้อมูลผู้เรียก API จาก payload.line_user_id
  * isAdmin = true ถ้า role ในชีตเป็น "admin" หรือถ้าเป็นคนที่ตรงกับ ADMIN_LINE_USER_ID
- * (ใช้ปลดล็อกแอดมินคนแรกตอนยังไม่มีใคร role admin ในชีตเลย)
+ * (ใช้ปลดล็อกแอดมินคนแรกตอนยังไม่มีใคร role admin ในชีตเลย — bootstrap admin ถือว่า approved ด้วยเสมอ)
  */
 function getCurrentUser(payload) {
   const line_user_id = payload.line_user_id || "";
   const row = findLineUser(line_user_id);
   const bootstrapAdminId = PropertiesService.getScriptProperties().getProperty("ADMIN_LINE_USER_ID");
-  const isAdmin = (row && row.role === "admin") || (!!bootstrapAdminId && line_user_id === bootstrapAdminId);
+  const isBootstrapAdmin = !!bootstrapAdminId && line_user_id === bootstrapAdminId;
+  const isAdmin = (row && row.role === "admin") || isBootstrapAdmin;
+  const approved = isBootstrapAdmin || (row ? isUserApproved(row) : false);
   return {
     line_user_id,
     display_name: row ? row.display_name : "",
     lab: row ? row.lab : "",
     isAdmin,
+    approved,
   };
 }
 
@@ -234,19 +245,22 @@ function doPost(e) {
 function registerLineUser(payload) {
   const users = getSheetData("LineUsers");
   const existing = users.find(u => u.line_user_id === payload.line_user_id);
+  const me = getCurrentUser(payload);
   if (existing) {
     if (!existing.active || existing.display_name !== payload.display_name) {
       updateRow("LineUsers", existing._row, { ...existing, display_name: payload.display_name, active: true });
     }
-    return { updated: true, role: existing.role || "user", lab: existing.lab || "" };
+    return { updated: true, role: existing.role || "user", lab: existing.lab || "", approved: me.approved };
   }
-  appendRow("LineUsers", { line_user_id: payload.line_user_id, display_name: payload.display_name, role: "user", lab: "", active: true });
-  return { created: true, role: "user", lab: "" };
+  appendRow("LineUsers", { line_user_id: payload.line_user_id, display_name: payload.display_name, role: "user", lab: "", active: true, approved: false });
+  return { created: true, role: "user", lab: "", approved: me.approved };
 }
 
 /** ผู้ใช้เลือก Lab ของตัวเองครั้งแรกที่เปิดแอป (ตั้งได้ครั้งเดียว — ถ้าจะเปลี่ยนทีหลังต้องให้แอดมินตั้งให้ผ่านหน้า "สิทธิ์ผู้ใช้") */
 function setMyLab(payload) {
   if (LABS.indexOf(payload.lab) === -1) throw new Error("กรุณาเลือก Lab ให้ถูกต้อง");
+  const me = getCurrentUser(payload);
+  if (!me.approved) throw new Error("ยังไม่ได้รับการอนุมัติจากแอดมิน กรุณารอแอดมินอนุมัติก่อนเลือก Lab");
   const existing = findLineUser(payload.line_user_id);
   if (!existing) throw new Error("ไม่พบผู้ใช้นี้ กรุณาเปิดแอปผ่าน Line ใหม่อีกครั้ง");
   if (existing.lab) return { lab: existing.lab }; // ตั้งไปแล้ว ไม่ให้ตั้งซ้ำ (ให้แอดมินเปลี่ยนแทน)
@@ -263,10 +277,14 @@ function listUsers(payload) {
     role: u.role || "user",
     lab: u.lab || "",
     active: u.active,
+    approved: isUserApproved(u),
   }));
 }
 
-/** แอดมินเปลี่ยนบทบาท/Lab ของผู้ใช้คนใดก็ได้ */
+/**
+ * แอดมินเปลี่ยนบทบาท/Lab ของผู้ใช้คนใดก็ได้ และ/หรืออนุมัติให้เข้าใช้งาน
+ * การตั้ง Lab ให้ใคร ถือเป็นการอนุมัติไปในตัวเสมอ (จะอนุมัติแยกโดยไม่ตั้ง Lab ก็ได้ผ่าน payload.approved)
+ */
 function setUserPermissions(payload) {
   requireAdmin(payload);
   if (!payload.target_line_user_id) throw new Error("ไม่พบผู้ใช้ที่จะแก้ไข");
@@ -274,10 +292,12 @@ function setUserPermissions(payload) {
   if (payload.lab && LABS.indexOf(payload.lab) === -1) throw new Error("Lab ไม่ถูกต้อง");
   const existing = findLineUser(payload.target_line_user_id);
   if (!existing) throw new Error("ไม่พบผู้ใช้นี้");
+  const approveNow = payload.approved === true || payload.lab !== undefined;
   updateRow("LineUsers", existing._row, {
     ...existing,
     role: payload.role !== undefined ? payload.role : existing.role,
     lab: payload.lab !== undefined ? payload.lab : existing.lab,
+    approved: approveNow ? true : existing.approved,
   });
   return { updated: true };
 }
@@ -390,6 +410,7 @@ function recordTransfer(payload) {
   }
 
   const me = getCurrentUser(payload);
+  if (!me.approved) throw new Error("ยังไม่ได้รับการอนุมัติจากแอดมิน กรุณารอแอดมินอนุมัติก่อนใช้งาน");
   if (!me.lab) throw new Error("ยังไม่ได้ระบุ Lab ของคุณ กรุณาเปิดแอปใหม่อีกครั้ง");
 
   const plants = getSheetData("PlantTypes");
@@ -546,6 +567,7 @@ function computeDashboardData(transfers, plants, storage) {
       round_in_stage,
       next_transfer_date: t.next_transfer_date,
       next_recipe: nextRecipeFor(plants, t),
+      recorded_by: t.recorded_by,
     };
   });
 
@@ -581,7 +603,10 @@ function getDashboard(payload) {
   const plants = getSheetData("PlantTypes");
   const storage = getSheetData("Storage").filter(s => s.active !== false);
   const data = computeDashboardData(transfers, plants, storage);
-  return { ...data, lab: viewLab, is_admin: me.isAdmin };
+  const members = getSheetData("LineUsers")
+    .filter(u => u.active !== false && (viewLab ? u.lab === viewLab : true))
+    .map(u => ({ display_name: u.display_name, role: u.role || "user", lab: u.lab || "" }));
+  return { ...data, lab: viewLab, is_admin: me.isAdmin, members };
 }
 
 // ===================================================================

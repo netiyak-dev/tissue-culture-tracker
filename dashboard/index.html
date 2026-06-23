@@ -17,6 +17,8 @@
     <span class="lab-badge hidden" id="lab-badge"></span>
   </div>
 
+  <div class="chip-grid hidden" id="lab-filter" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px;"></div>
+
   <div class="stat-row" id="stat-row">
     <div class="stat-box"><div class="num">–</div><div class="label">ล็อตทั้งหมด</div></div>
     <div class="stat-box"><div class="num">–</div><div class="label">ต้นรวม</div></div>
@@ -37,6 +39,11 @@
     </div>
 
     <div>
+      <h2>สมาชิกแลป</h2>
+      <div class="card" id="members-card">
+        <div id="members-list"></div>
+      </div>
+
       <h2>ภาพรวมตามชนิดพืช</h2>
       <div id="plant-overview"></div>
     </div>
@@ -61,13 +68,64 @@ function stageStepper(stage) {
   `;
 }
 
-async function loadDashboard() {
+function renderLabFilter(data) {
+  const filter = document.getElementById("lab-filter");
+  if (!data.is_admin) {
+    filter.classList.add("hidden");
+    return;
+  }
+  filter.classList.remove("hidden");
+  filter.innerHTML = "";
+  [["", "ทุก Lab"], ...LABS.map(l => [l, l])].forEach(([value, label]) => {
+    const chip = document.createElement("div");
+    chip.className = "chip" + ((data.lab || "") === value ? " active" : "");
+    chip.textContent = label;
+    chip.addEventListener("click", () => loadDashboard(value));
+    filter.appendChild(chip);
+  });
+}
+
+function renderMembers(data) {
+  const list = document.getElementById("members-list");
+  if (!data.members || data.members.length === 0) {
+    list.innerHTML = '<p class="muted">ยังไม่มีสมาชิกในแลปนี้</p>';
+    return;
+  }
+  if (data.lab) {
+    list.innerHTML = data.members.map(m => `
+      <div class="due-item">
+        <div class="name">${m.display_name}</div>
+        <div class="muted">${m.role === "admin" ? "Admin" : "User"}</div>
+      </div>
+    `).join("");
+    return;
+  }
+  list.innerHTML = LABS.map(lab => {
+    const inLab = data.members.filter(m => m.lab === lab);
+    return `
+      <h3 style="margin-top:12px;">Lab ${lab}</h3>
+      ${inLab.length === 0
+        ? '<p class="muted">ยังไม่มีสมาชิก</p>'
+        : inLab.map(m => `
+          <div class="due-item">
+            <div class="name">${m.display_name}</div>
+            <div class="muted">${m.role === "admin" ? "Admin" : "User"}</div>
+          </div>
+        `).join("")}
+    `;
+  }).join("");
+}
+
+async function loadDashboard(viewLab) {
   try {
-    const data = await TissueApp.call("getDashboard");
+    const data = await TissueApp.call("getDashboard", viewLab ? { view_lab: viewLab } : {});
 
     const badge = document.getElementById("lab-badge");
     badge.textContent = data.lab ? "Lab " + data.lab : "ทุก Lab";
     badge.classList.remove("hidden");
+
+    renderLabFilter(data);
+    renderMembers(data);
 
     // แถบสรุป
     const statRow = document.getElementById("stat-row");
@@ -87,6 +145,7 @@ async function loadDashboard() {
           <div>
             <div class="name">${data.lab ? "" : "Lab " + d.lab + " · "}${d.plant_name} <span class="muted">(${d.stage} ${d.round_in_stage})</span></div>
             <div class="loc">ล็อต ${d.lot_no} · ชั้น ${d.shelf}/${d.sub_shelf} · ${d.media_type}${d.bottle_no ? " #" + d.bottle_no : ""} · สูตรรอบหน้า: ${d.next_recipe || "-"}</div>
+            <div class="loc">บันทึกโดย: ${d.recorded_by || "-"}</div>
           </div>
           <div class="date">${d.next_transfer_date}</div>
         </div>
