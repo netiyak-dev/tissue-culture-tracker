@@ -349,6 +349,9 @@ function listPlantsWithCount(payload) {
   const viewLab = resolveViewLab(me, payload);
   const plants = getSheetData("PlantTypes").filter(p => p.active !== false);
   const transfers = getSheetData("Transfers").filter(t => t.lab && (viewLab ? t.lab === viewLab : me.isAdmin));
+  // เลขล็อตล่าสุดที่เคยใช้ ต้องอิง Lab ของผู้เรียกเองเสมอ (me.lab) ไม่ใช่ viewLab — เพราะใช้ช่วยจำว่า
+  // "ล็อตใหม่ที่จะบันทึกเข้า Lab ตัวเอง" ควรเป็นเลขอะไรต่อ ถ้าใช้ viewLab แอดมินที่ดูรวมทุก Lab จะได้เลขที่ปนกันข้าม Lab ไม่มีประโยชน์
+  const myLabTransfers = me.lab ? getSheetData("Transfers").filter(t => t.lab === me.lab) : [];
   return plants.map(p => {
     const latestByLot = {};
     transfers.filter(t => t.plant_id === p.plant_id).forEach(t => {
@@ -358,7 +361,13 @@ function listPlantsWithCount(payload) {
       }
     });
     const activeCount = Object.values(latestByLot).filter(t => !!t.next_transfer_date).length;
-    return { plant_id: p.plant_id, plant_name: p.plant_name, active_count: activeCount };
+    // เทียบเลขล็อตเป็นตัวเลขเท่านั้น (ข้ามค่าที่ไม่ใช่ตัวเลข เช่นกรอกตัวอักษรปนมา) เอาเลขสูงสุดที่เคยใช้ในชนิดพืชนี้ + Lab ตัวเอง
+    const numericLotNos = myLabTransfers
+      .filter(t => t.plant_id === p.plant_id)
+      .map(t => Number(t.lot_no))
+      .filter(n => !isNaN(n));
+    const latest_lot_no = numericLotNos.length > 0 ? Math.max(...numericLotNos) : null;
+    return { plant_id: p.plant_id, plant_name: p.plant_name, active_count: activeCount, latest_lot_no };
   });
 }
 

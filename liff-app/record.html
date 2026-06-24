@@ -40,6 +40,7 @@
 
     <div class="field" id="lot-new-field">
       <input type="text" id="lot-no-input" placeholder="เช่น 7" />
+      <p class="muted" id="latest-lot-hint" style="margin-top:6px;"></p>
     </div>
 
     <div class="field hidden" id="lot-existing-field">
@@ -220,6 +221,7 @@ async function loadPlants() {
   const requestedId = TissueApp.getParam("plant_id");
   if (requestedId) sel.value = requestedId;
   updateTitle();
+  updateLatestLotHint();
 }
 
 function updateTitle() {
@@ -228,8 +230,19 @@ function updateTitle() {
   document.getElementById("plant-title").textContent = plant ? plant.plant_name : "บันทึกการถ่ายโอน";
 }
 
+/** โชว์เลขล็อตล่าสุดที่เคยใช้ของชนิดพืชนี้ใน Lab ตัวเอง ช่วยจำว่าล็อตใหม่ควรเป็นเลขอะไรต่อ */
+function updateLatestLotHint() {
+  const sel = document.getElementById("plant-select");
+  const plant = plantsCache.find(p => p.plant_id === sel.value);
+  const hint = document.getElementById("latest-lot-hint");
+  hint.textContent = (plant && plant.latest_lot_no !== null && plant.latest_lot_no !== undefined)
+    ? `ล็อตล่าสุดของชนิดนี้ใน Lab คุณ: ${plant.latest_lot_no}`
+    : "";
+}
+
 document.getElementById("plant-select").addEventListener("change", () => {
   updateTitle();
+  updateLatestLotHint();
   if (lotMode === "existing") loadActiveLots();
 });
 
@@ -263,6 +276,15 @@ document.getElementById("save-btn").addEventListener("click", async () => {
       sub_shelf: selectedSub,
       recorded_by: (TissueApp.profile && TissueApp.profile.displayName) || "ไม่ระบุชื่อ",
     });
+
+    // อัปเดตเลขล็อตล่าสุดที่จำไว้ในแคชทันที ไม่ต้องรอโหลดใหม่ทั้งหน้า — กันโชว์เลขล็อตเก่าค้างถ้าบันทึกล็อตใหม่ต่อกันหลายรายการ
+    if (lotMode === "new") {
+      const plant = plantsCache.find(p => p.plant_id === plant_id);
+      const newLotNoNum = Number(lot_no);
+      if (plant && !isNaN(newLotNoNum) && (plant.latest_lot_no === null || newLotNoNum > plant.latest_lot_no)) {
+        plant.latest_lot_no = newLotNoNum;
+      }
+    }
 
     document.getElementById("form-wrap").classList.add("hidden");
     document.getElementById("after-actions").classList.remove("hidden");
