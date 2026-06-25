@@ -62,16 +62,6 @@
     </div>
 
     <div class="field">
-      <label>ระยะการเจริญเติบโต</label>
-      <div id="stage-grid" class="chip-grid chip-grid-3">
-        <div class="chip chip-lg active" data-stage="ขยาย">ขยาย</div>
-        <div class="chip chip-lg" data-stage="กระตุ้นราก">กระตุ้นราก</div>
-        <div class="chip chip-lg" data-stage="พร้อมออกปลูก">พร้อมออกปลูก</div>
-      </div>
-      <p class="muted" id="stage-hint" style="margin-top:6px;">เลือกระยะของรอบนี้เอง — รอบขยายทำได้หลายรอบ จะย้ายไปกระตุ้นราก/ออกปลูกเมื่อไหร่ก็ได้</p>
-    </div>
-
-    <div class="field">
       <label>ประเภทรอบนี้</label>
       <div id="media-type-grid" class="chip-grid chip-grid-2">
         <div class="chip chip-lg" data-media="SS">SS<span class="sub">กึ่งแข็ง</span></div>
@@ -81,7 +71,18 @@
 
     <div class="field hidden" id="bottle-no-field">
       <label>หมายเลขขวด (สำหรับ TIB)</label>
-      <input type="text" id="bottle-no" placeholder="เช่น TIB-014" />
+      <input type="text" id="bottle-no" placeholder="เช่น TIB-014, TIB-015, TIB-016" />
+      <p class="muted" style="margin-top:6px;">ใส่ได้หลายขวด คั่นด้วยจุลภาค ( , ) — ล็อตหนึ่งอาจกระจายลงหลายขวด</p>
+    </div>
+
+    <div class="field">
+      <label>ระยะการเจริญเติบโต</label>
+      <div id="stage-grid" class="chip-grid chip-grid-3">
+        <div class="chip chip-lg active" data-stage="ขยาย">ขยาย</div>
+        <div class="chip chip-lg" data-stage="กระตุ้นราก">กระตุ้นราก</div>
+        <div class="chip chip-lg" data-stage="พร้อมออกปลูก">พร้อมออกปลูก</div>
+      </div>
+      <p class="muted" id="stage-hint" style="margin-top:6px;">เลือกระยะของรอบนี้เอง — รอบขยายทำได้หลายรอบ จะย้ายไปกระตุ้นราก/ออกปลูกเมื่อไหร่ก็ได้</p>
     </div>
 
     <div class="field">

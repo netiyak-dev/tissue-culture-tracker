@@ -520,6 +520,12 @@ function recordTransfer(payload) {
   const plants_per_bottle = Number(payload.plants_per_bottle);
   const quantity = bottle_count * plants_per_bottle;
 
+  // หมายเลขขวด TIB ใส่ได้หลายขวด คั่นด้วยจุลภาค — เก็บเป็นสตริงเดียวที่จัดรูปแล้ว (ตัดช่องว่าง/ขวดว่างทิ้ง คั่นด้วย ", ")
+  const bottle_no = isTib
+    ? String(payload.bottle_no).split(",").map(s => s.trim()).filter(Boolean).join(", ")
+    : "";
+  if (isTib && !bottle_no) throw new Error("กรุณาใส่หมายเลขขวด (จำเป็นสำหรับ TIB)");
+
   const record = {
     record_id: genId("rec"),
     plant_id: plant.plant_id,
@@ -532,7 +538,7 @@ function recordTransfer(payload) {
     bottle_count,
     plants_per_bottle,
     media_type: payload.media_type,
-    bottle_no: isTib ? payload.bottle_no : "",
+    bottle_no,
     shelf: payload.shelf,
     sub_shelf: payload.sub_shelf,
     stage,
