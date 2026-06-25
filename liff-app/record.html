@@ -62,6 +62,16 @@
     </div>
 
     <div class="field">
+      <label>ระยะการเจริญเติบโต</label>
+      <div id="stage-grid" class="chip-grid chip-grid-3">
+        <div class="chip chip-lg active" data-stage="ขยาย">ขยาย</div>
+        <div class="chip chip-lg" data-stage="กระตุ้นราก">กระตุ้นราก</div>
+        <div class="chip chip-lg" data-stage="พร้อมออกปลูก">พร้อมออกปลูก</div>
+      </div>
+      <p class="muted" id="stage-hint" style="margin-top:6px;">เลือกระยะของรอบนี้เอง — รอบขยายทำได้หลายรอบ จะย้ายไปกระตุ้นราก/ออกปลูกเมื่อไหร่ก็ได้</p>
+    </div>
+
+    <div class="field">
       <label>ประเภทรอบนี้</label>
       <div id="media-type-grid" class="chip-grid chip-grid-2">
         <div class="chip chip-lg" data-media="SS">SS<span class="sub">กึ่งแข็ง</span></div>
@@ -99,6 +109,7 @@
 let selectedShelf = null;
 let selectedSub = null;
 let selectedMedia = null;
+let selectedStage = "ขยาย"; // ค่าเริ่มต้น: ล็อตใหม่เริ่มที่ระยะขยาย — ผู้ใช้เปลี่ยนเองได้ทุกรอบ
 let plantsCache = [];
 let storageCache = { shelves: [], subs: [] };
 let lotMode = "new";
@@ -148,6 +159,17 @@ document.querySelectorAll("#media-type-grid .chip").forEach(chip => {
     selectedMedia = chip.dataset.media;
     document.getElementById("bottle-no-field").classList.toggle("hidden", selectedMedia !== "TIB");
   });
+});
+
+// ---------- เลือกระยะการเจริญเติบโต (ขยาย / กระตุ้นราก / พร้อมออกปลูก) ----------
+function setStage(stage) {
+  selectedStage = stage;
+  document.querySelectorAll("#stage-grid .chip").forEach(c =>
+    c.classList.toggle("active", c.dataset.stage === stage)
+  );
+}
+document.querySelectorAll("#stage-grid .chip").forEach(chip => {
+  chip.addEventListener("click", () => setStage(chip.dataset.stage));
 });
 
 // ---------- preview จำนวนต้นรวม (ขวด x ต้นต่อขวด) — แค่โชว์ ค่าจริงคำนวณที่ backend ----------
@@ -211,6 +233,7 @@ function renderActiveLots() {
       document.querySelectorAll("#lot-list .card").forEach(c => c.classList.remove("active"));
       card.classList.add("active");
       selectedLotNo = l.lot_no;
+      if (l.stage) setStage(l.stage); // ตั้งระยะเริ่มต้นตามระยะปัจจุบันของล็อต (เปลี่ยนได้ถ้าจะย้ายระยะรอบนี้)
     });
     list.appendChild(card);
   });
@@ -293,6 +316,7 @@ document.getElementById("save-btn").addEventListener("click", async () => {
   }
   if (!bottleCount || Number(bottleCount) <= 0) return alert("กรุณาใส่จำนวนขวดที่ทำได้");
   if (!plantsPerBottle || Number(plantsPerBottle) <= 0) return alert("กรุณาใส่จำนวนต้นต่อขวด");
+  if (!selectedStage) return alert("กรุณาเลือกระยะการเจริญเติบโต");
   if (!selectedMedia) return alert("กรุณาเลือกประเภทรอบนี้ (TIB หรือ SS)");
   if (selectedMedia === "TIB" && !bottle_no) return alert("กรุณาใส่หมายเลขขวด (จำเป็นสำหรับ TIB)");
   if (!selectedShelf) return alert("กรุณาเลือกชั้นเก็บ");
@@ -305,6 +329,7 @@ document.getElementById("save-btn").addEventListener("click", async () => {
       plant_id,
       lot_no,
       lot_mode: lotMode,
+      stage: selectedStage,
       bottle_count: Number(bottleCount),
       plants_per_bottle: Number(plantsPerBottle),
       media_type: selectedMedia,
@@ -363,6 +388,7 @@ document.getElementById("record-next-btn").addEventListener("click", () => {
   selectedShelf = null;
   selectedSub = null;
   selectedMedia = null;
+  setStage("ขยาย");
   loadStorage();
   refreshActiveLots(); // ล็อตที่เพิ่งบันทึกตอนนี้กำลังติดตามอยู่แล้ว ต้องอัปเดตแคชเพื่อกันบันทึกซ้ำเป็น "ล็อตใหม่" อีกรอบ
 });

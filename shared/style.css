@@ -214,6 +214,8 @@ p { line-height: 1.6; margin: 0 0 var(--space-3) 0; }
 
 /* ตัวเลือก 2 ช่อง (เช่น TIB/SS) */
 .chip-grid-2 { grid-template-columns: repeat(2, 1fr); }
+/* ตัวเลือก 3 ช่อง (เช่น ระยะการเจริญเติบโต) */
+.chip-grid-3 { grid-template-columns: repeat(3, 1fr); }
 .chip-lg { padding: 16px 8px; font-size: 15px; }
 .chip-lg .sub { display: block; font-size: 11px; font-weight: 400; color: var(--text-muted); margin-top: 2px; }
 .chip-lg.active .sub { color: rgba(255,255,255,0.8); }

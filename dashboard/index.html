@@ -225,7 +225,7 @@ async function loadDashboard(viewLab) {
       dueList.innerHTML = data.due_soon.map(d => `
         <div class="due-item">
           <div>
-            <div class="name">${data.lab ? "" : "Lab " + d.lab + " · "}${d.plant_name} <span class="muted">(${d.stage} ${d.round_in_stage})</span></div>
+            <div class="name">${data.lab ? "" : "Lab " + d.lab + " · "}${d.plant_name} <span class="muted">(${d.stage} รอบที่ ${d.round_in_stage})</span></div>
             <div class="loc">ล็อต ${d.lot_no} · ชั้น ${d.shelf}/${d.sub_shelf} · ${d.media_type}${d.bottle_no ? " #" + d.bottle_no : ""} · สูตรรอบหน้า: ${d.next_recipe || "-"}</div>
             <div class="loc">บันทึกโดย: ${d.recorded_by || "-"}</div>
           </div>

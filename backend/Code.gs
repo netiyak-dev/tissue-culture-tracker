@@ -448,7 +448,7 @@ function deactivateStorageValue(payload) {
 // Handler หลัก: บันทึกการถ่ายโอนเนื้อเยื่อ + คำนวณระยะ/สูตร/วันถัดไปอัตโนมัติ
 // ===================================================================
 function recordTransfer(payload) {
-  const required = ["plant_id", "lot_no", "bottle_count", "plants_per_bottle", "shelf", "sub_shelf", "media_type"];
+  const required = ["plant_id", "lot_no", "bottle_count", "plants_per_bottle", "shelf", "sub_shelf", "media_type", "stage"];
   required.forEach(f => {
     if (payload[f] === undefined || payload[f] === "") throw new Error("กรุณากรอกข้อมูลให้ครบ: " + f);
   });
@@ -457,6 +457,10 @@ function recordTransfer(payload) {
   }
   if (MEDIA_TYPES.indexOf(payload.media_type) === -1) {
     throw new Error("ประเภทรอบต้องเป็น TIB หรือ SS");
+  }
+  // ระยะเลือกเองตอนบันทึก ไม่ได้คำนวณจากจำนวนรอบอัตโนมัติแล้ว เพราะรอบขยายไม่ตายตัว (ผู้ใช้ตัดสินใจเองว่าจะย้ายระยะเมื่อไหร่)
+  if (STAGE_NAMES.indexOf(payload.stage) === -1) {
+    throw new Error("กรุณาเลือกระยะการเจริญเติบโต (ขยาย / กระตุ้นราก / พร้อมออกปลูก)");
   }
   if (payload.media_type === "TIB" && !payload.bottle_no) {
     throw new Error("กรุณาใส่หมายเลขขวด (จำเป็นสำหรับ TIB)");
@@ -473,50 +477,44 @@ function recordTransfer(payload) {
   // ระบุรอบที่ด้วย (plant_id, lot_no, lab) ไม่ใช้ตำแหน่งเก็บ (shelf/sub_shelf) อีกต่อไป
   // เพราะล็อตเดียวกันอาจย้ายตำแหน่งเก็บได้ระหว่างรอบ — ตำแหน่งเป็นแค่ metadata ของรอบนั้นๆ
   // ผูกกับ lab ด้วยเพื่อไม่ให้ Lab อื่นที่ใช้หมายเลขล็อตเดียวกันโดยบังเอิญมาปนกัน
-  // ถ้า lot_no นี้เคยจบไปแล้ว (แถวล่าสุดไม่มี next_transfer_date) จะถือเป็นล็อตใหม่ เริ่มรอบที่ 1 ใหม่
   const transfers = getSheetData("Transfers");
   const sameLot = transfers.filter(t =>
     t.plant_id === payload.plant_id && String(t.lot_no) === String(payload.lot_no) && t.lab === me.lab
   );
+  // รอบก่อนหน้า = แถวล่าสุดของล็อตนี้ (ทุกระยะ รวมที่จบแล้ว) ใช้ไล่ลำดับ round_no
   let previous = null;
   sameLot.forEach(t => {
-    if (t.next_transfer_date && (!previous || isLaterTransfer(t, previous))) {
-      previous = t;
-    }
+    if (!previous || isLaterTransfer(t, previous)) previous = t;
   });
 
-  // ผู้ใช้เลือกโหมด "ล็อตใหม่" ตั้งใจสร้างล็อตที่ไม่เคยมีมาก่อน — ถ้าเลขล็อตนี้ยังมีรอบที่แอคทีฟอยู่
-  // (ยังไม่ถึงระยะพร้อมออกปลูก) ถือว่าซ้ำกับล็อตเดิม ต้องกันไว้ ไม่ให้บันทึกทับเป็นรอบต่อไปของล็อตเดิมโดยไม่ตั้งใจ
-  // (เลขล็อตที่ "จบไปแล้ว" ยังนำมาใช้ใหม่ได้ตามปกติ ไม่ถือว่าซ้ำ)
-  if (payload.lot_mode === "new" && previous) {
-    throw new Error("เลขล็อต " + payload.lot_no + " กำลังถูกติดตามอยู่แล้ว (ยังไม่ถึงระยะพร้อมออกปลูก) กรุณาใช้เลขล็อตอื่น หรือเลือก \"ล็อตที่มีอยู่\" แทน");
+  // เลขล็อตห้ามซ้ำถาวร (ต่อ plant_id + lab) — เพราะนับจำนวนต้นรวมทุกระยะ รวมล็อตที่ออกปลูกแล้ว และไม่มีการยกเลิกล็อต
+  // เลขเดิมจึงนำกลับมาใช้ใหม่ไม่ได้ ถึงล็อตเก่าจะจบไปแล้วก็ตาม — โหมด "ล็อตใหม่" ต้องเป็นเลขที่ไม่เคยใช้เท่านั้น
+  if (payload.lot_mode === "new" && sameLot.length > 0) {
+    throw new Error("เลขล็อต " + payload.lot_no + " เคยถูกใช้ไปแล้ว กรุณาใช้เลขอื่น หรือเลือก \"ล็อตที่มีอยู่\" เพื่อบันทึกรอบต่อไปของล็อตนี้");
   }
 
   const round_no = previous ? Number(previous.round_no) + 1 : 1;
-  const stage1Rounds = Number(plant.stage1_rounds) || 1;
 
   const today = new Date();
-  let stage, recipe_used, next_transfer_date = "", round_in_stage;
+  // ระยะมาจากที่ผู้ใช้เลือกเองในฟอร์ม (payload.stage) ไม่คำนวณจาก round_no อีกต่อไป
+  // สูตร/วันถัดไป อิงตามระยะที่เลือก: ขยาย→stage1, กระตุ้นราก→stage2, พร้อมออกปลูก→stage3 (ไม่มีวันถัดไป จบรอบติดตาม แต่ยังนับเป็นต้นในระบบ)
+  const stage = payload.stage;
+  let recipe_used, next_transfer_date = "";
   const isTib = payload.media_type === "TIB";
 
-  if (round_no <= stage1Rounds) {
-    stage = STAGE_NAMES[0];
+  if (stage === STAGE_NAMES[0]) {
     recipe_used = isTib ? plant.stage1_recipe_tib : plant.stage1_recipe_ss;
     const next = new Date(today); next.setDate(next.getDate() + Number(plant.stage1_days));
     next_transfer_date = formatThaiDate(next);
-    round_in_stage = `${round_no}/${stage1Rounds}`;
-  } else if (round_no === stage1Rounds + 1) {
-    stage = STAGE_NAMES[1];
+  } else if (stage === STAGE_NAMES[1]) {
     recipe_used = isTib ? plant.stage2_recipe_tib : plant.stage2_recipe_ss;
     const next = new Date(today); next.setDate(next.getDate() + Number(plant.stage2_days));
     next_transfer_date = formatThaiDate(next);
-    round_in_stage = "1/1";
   } else {
-    stage = STAGE_NAMES[2];
     recipe_used = isTib ? plant.stage3_recipe_tib : plant.stage3_recipe_ss;
     next_transfer_date = "";
-    round_in_stage = "-";
   }
+  const round_in_stage = round_no; // แสดงเป็น "รอบที่ N" (ลำดับรอบรวมของล็อต) — ระยะไม่ fix ตามรอบแล้ว เลยไม่ใช้รูปแบบ X/Y
 
   const bottle_count = Number(payload.bottle_count);
   const plants_per_bottle = Number(payload.plants_per_bottle);
@@ -595,7 +593,7 @@ function notifyAfterRecord(record, round_in_stage, recorderLineUserId) {
  * (ต้องคำนวณทีละ Lab + รวมทุก Lab สำหรับแอดมิน) ใช้ตรรกะเดียวกันไม่ซ้ำโค้ด
  */
 function computeDashboardData(transfers, plants, storage, targetDate) {
-  // นับ "ล็อต" ที่กำลังติดตามอยู่ ไม่ใช่ตำแหน่งเก็บ — แถวเก่าที่ไม่มี lot_no/lab (ก่อนอัปเดตฟีเจอร์นี้) ถูกข้าม
+  // หา "รอบล่าสุดของแต่ละล็อต" — แถวเก่าที่ไม่มี lot_no/lab (ก่อนอัปเดตฟีเจอร์นี้) ถูกข้าม
   const latestByLot = {};
   transfers.forEach(t => {
     if (!t.lot_no) return;
@@ -604,10 +602,13 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
       latestByLot[key] = t;
     }
   });
-  const activeLots = Object.values(latestByLot).filter(t => !!t.next_transfer_date);
+  // allLots = ทุกล็อตในระบบ ทุกระยะ (รวม "พร้อมออกปลูก" ที่จบรอบติดตามแล้ว) — ไม่มีการยกเลิกล็อต ต้นทุกระยะยังนับเป็นต้นในระบบ
+  // activeLots = เฉพาะล็อตที่ยังมีรอบถัดไป (ยังไม่ถึงพร้อมออกปลูก) — ใช้กับ "ใกล้ถึงกำหนดถ่ายโอน" เท่านั้น
+  const allLots = Object.values(latestByLot);
+  const activeLots = allLots.filter(t => !!t.next_transfer_date);
 
-  const total_lots = activeLots.length;
-  const total_plants = activeLots.reduce((sum, t) => sum + Number(t.quantity || 0), 0);
+  const total_lots = allLots.length;
+  const total_plants = allLots.reduce((sum, t) => sum + Number(t.quantity || 0), 0);
 
   const now = new Date();
   const withDays = activeLots
@@ -616,27 +617,20 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
     .sort((a, b) => a._daysLeft - b._daysLeft)
     .slice(0, 20);
 
-  const due_soon = withDays.map(t => {
-    const plant = plants.find(p => p.plant_id === t.plant_id);
-    const stage1Rounds = plant ? (Number(plant.stage1_rounds) || 1) : 1;
-    let round_in_stage = "-";
-    if (t.stage === STAGE_NAMES[0]) round_in_stage = `${t.round_no}/${stage1Rounds}`;
-    else if (t.stage === STAGE_NAMES[1]) round_in_stage = "1/1";
-    return {
-      plant_name: t.plant_name,
-      lot_no: t.lot_no,
-      lab: t.lab,
-      shelf: t.shelf,
-      sub_shelf: t.sub_shelf,
-      media_type: t.media_type,
-      bottle_no: t.bottle_no,
-      stage: t.stage,
-      round_in_stage,
-      next_transfer_date: t.next_transfer_date,
-      next_recipe: nextRecipeFor(plants, t),
-      recorded_by: t.recorded_by,
-    };
-  });
+  const due_soon = withDays.map(t => ({
+    plant_name: t.plant_name,
+    lot_no: t.lot_no,
+    lab: t.lab,
+    shelf: t.shelf,
+    sub_shelf: t.sub_shelf,
+    media_type: t.media_type,
+    bottle_no: t.bottle_no,
+    stage: t.stage,
+    round_in_stage: t.round_no, // ระยะเลือกเองแล้ว ไม่ fix ตามรอบ — แสดงเป็นลำดับรอบรวมของล็อต "รอบที่ N"
+    next_transfer_date: t.next_transfer_date,
+    next_recipe: nextRecipeFor(plants, t),
+    recorded_by: t.recorded_by,
+  }));
 
   // คำนวณพยากรณ์อัตโนมัติต่อชนิดพืชใน Dashboard — เริ่มจาก TODAY() เสมอ (ไม่ใช่ next_transfer_date ของล็อต)
   // นับเฉพาะ "ต้น" ที่ยังอยู่ระยะขยายเป็นชิ้นตั้งต้น ไม่ใช้ตัวคูณการขยายต่อชนิดพืชอีกต่อไป
@@ -646,8 +640,8 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
   // เป็นยอดเดียวกัน เพื่อให้ "พยากรณ์" หมายถึงจำนวนต้นทั้งหมดที่จะมีอยู่ ณ วันนั้น ไม่ใช่แค่ส่วนที่ยังอยู่ในระบบ
   const sysConfig = targetDate ? getSystemConfig() : null;
   const by_plant = plants.filter(p => p.active !== false).map(p => {
-    const lots = activeLots.filter(t => t.plant_id === p.plant_id);
-    // stage_counts นับเป็นจำนวน "ต้น" รวม (ผลรวม quantity ของล็อตในระยะนั้น) ไม่ใช่จำนวนล็อต
+    const lots = allLots.filter(t => t.plant_id === p.plant_id);
+    // stage_counts นับเป็นจำนวน "ต้น" รวม (ผลรวม quantity ของล็อตในระยะนั้น) ไม่ใช่จำนวนล็อต — รวมระยะพร้อมออกปลูกด้วย
     const stage_counts = { "ขยาย": 0, "กระตุ้นราก": 0, "พร้อมออกปลูก": 0 };
     lots.forEach(t => { stage_counts[t.stage] = (stage_counts[t.stage] || 0) + Number(t.quantity || 0); });
     const dominant_stage = Object.keys(stage_counts).reduce((a, b) => stage_counts[a] >= stage_counts[b] ? a : b, "ขยาย");
@@ -685,7 +679,7 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
   const storage_overview = [];
   shelves.forEach(shelf => {
     subs.forEach(sub => {
-      const count = activeLots.filter(t => String(t.shelf) === String(shelf) && String(t.sub_shelf) === String(sub)).length;
+      const count = allLots.filter(t => String(t.shelf) === String(shelf) && String(t.sub_shelf) === String(sub)).length;
       storage_overview.push({ shelf, sub_shelf: sub, count });
     });
   });
@@ -1023,12 +1017,11 @@ function predictQuantityForLot(lot, plant, targetDate) {
 function nextRecipeFor(plants, transferRow) {
   const plant = plants.find(p => p.plant_id === transferRow.plant_id);
   if (!plant) return "";
-  const stage1Rounds = Number(plant.stage1_rounds) || 1;
-  const nextRound = Number(transferRow.round_no) + 1;
+  // ระยะถัดไปกำหนดเองตอนบันทึก คาดเดาไม่ได้แน่นอน — แนะนำสูตรของ "ระยะปัจจุบัน" ไว้ก่อน (กรณีพบบ่อยสุดคือทำระยะเดิมต่อ เช่นขยายอีกรอบ)
   const isTib = transferRow.media_type === "TIB";
-  if (nextRound <= stage1Rounds) return isTib ? plant.stage1_recipe_tib : plant.stage1_recipe_ss;
-  if (nextRound === stage1Rounds + 1) return isTib ? plant.stage2_recipe_tib : plant.stage2_recipe_ss;
-  return isTib ? plant.stage3_recipe_tib : plant.stage3_recipe_ss;
+  if (transferRow.stage === STAGE_NAMES[1]) return isTib ? plant.stage2_recipe_tib : plant.stage2_recipe_ss;
+  if (transferRow.stage === STAGE_NAMES[2]) return isTib ? plant.stage3_recipe_tib : plant.stage3_recipe_ss;
+  return isTib ? plant.stage1_recipe_tib : plant.stage1_recipe_ss;
 }
 
 function parseThaiDateApprox(thaiDateStr) {
