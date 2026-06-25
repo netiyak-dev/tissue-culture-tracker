@@ -356,7 +356,7 @@ function listPlantsWithCount(payload) {
     const latestByLot = {};
     transfers.filter(t => t.plant_id === p.plant_id).forEach(t => {
       const key = t.lab + "|" + t.lot_no;
-      if (!latestByLot[key] || parseThaiDateApprox(t.transfer_date) > parseThaiDateApprox(latestByLot[key].transfer_date)) {
+      if (!latestByLot[key] || isLaterTransfer(t, latestByLot[key])) {
         latestByLot[key] = t;
       }
     });
@@ -480,7 +480,7 @@ function recordTransfer(payload) {
   );
   let previous = null;
   sameLot.forEach(t => {
-    if (t.next_transfer_date && (!previous || parseThaiDateApprox(t.transfer_date) > parseThaiDateApprox(previous.transfer_date))) {
+    if (t.next_transfer_date && (!previous || isLaterTransfer(t, previous))) {
       previous = t;
     }
   });
@@ -600,7 +600,7 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
   transfers.forEach(t => {
     if (!t.lot_no) return;
     const key = t.plant_id + "|" + t.lab + "|" + t.lot_no;
-    if (!latestByLot[key] || parseThaiDateApprox(t.transfer_date) > parseThaiDateApprox(latestByLot[key].transfer_date)) {
+    if (!latestByLot[key] || isLaterTransfer(t, latestByLot[key])) {
       latestByLot[key] = t;
     }
   });
@@ -729,7 +729,7 @@ function listActiveLots(payload) {
   const latestByLot = {};
   transfers.forEach(t => {
     const key = t.lab + "|" + t.lot_no;
-    if (!latestByLot[key] || parseThaiDateApprox(t.transfer_date) > parseThaiDateApprox(latestByLot[key].transfer_date)) {
+    if (!latestByLot[key] || isLaterTransfer(t, latestByLot[key])) {
       latestByLot[key] = t;
     }
   });
@@ -764,7 +764,7 @@ function getLotHistory(payload) {
   );
   let current = null;
   transfers.forEach(t => {
-    if (!current || parseThaiDateApprox(t.transfer_date) > parseThaiDateApprox(current.transfer_date)) current = t;
+    if (!current || isLaterTransfer(t, current)) current = t;
   });
   if (!current) return [];
 
@@ -1040,6 +1040,19 @@ function parseThaiDateApprox(thaiDateStr) {
   const buddhistYear2digit = Number(parts[2]);
   const fullYear = 2500 + buddhistYear2digit - 543;
   return new Date(fullYear, month, day);
+}
+
+/**
+ * เทียบว่าแถว a เป็นรอบที่ "ใหม่กว่า" แถว b ของล็อตเดียวกันหรือไม่ (ใช้หา "รอบล่าสุด" ของแต่ละล็อต)
+ * ดูวันที่ถ่ายโอนเป็นหลัก — ถ้าวันเดียวกัน (บันทึกหลายรอบในวันเดียว เช่นตอนทดสอบ) ตัดสินด้วย round_no ที่มากกว่า
+ * สำคัญ: ถ้าเทียบด้วยวันที่อย่างเดียว แล้วบันทึก 2 รอบในวันเดียวกัน รอบหลังจะถูกมองข้าม ทำให้ค้างอยู่ที่รอบเก่า
+ */
+function isLaterTransfer(a, b) {
+  const da = parseThaiDateApprox(a.transfer_date);
+  const db = parseThaiDateApprox(b.transfer_date);
+  if (da > db) return true;
+  if (da < db) return false;
+  return Number(a.round_no) > Number(b.round_no);
 }
 
 // ===================================================================
