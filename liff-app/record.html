@@ -271,6 +271,7 @@ document.getElementById("save-btn").addEventListener("click", async () => {
     const result = await TissueApp.call("recordTransfer", {
       plant_id,
       lot_no,
+      lot_mode: lotMode,
       bottle_count: Number(bottleCount),
       plants_per_bottle: Number(plantsPerBottle),
       media_type: selectedMedia,
