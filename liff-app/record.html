@@ -103,6 +103,7 @@ let plantsCache = [];
 let storageCache = { shelves: [], subs: [] };
 let lotMode = "new";
 let selectedLotNo = null;
+let activeLotsCache = []; // ล็อตที่กำลังติดตามอยู่ของชนิดพืชที่เลือก — ใช้ทั้งแสดงรายการ "ล็อตที่มีอยู่" และกันเลขล็อตซ้ำตอนกรอก "ล็อตใหม่"
 
 function renderChips(container, items, onPick, addLabel) {
   container.innerHTML = "";
@@ -171,22 +172,32 @@ document.querySelectorAll("#lot-mode-grid .chip").forEach(chip => {
   });
 });
 
-async function loadActiveLots() {
+/** โหลดล็อตที่กำลังติดตามอยู่ของชนิดพืชที่เลือกเข้าแคช (เงียบๆ ไม่แตะ UI) — ใช้ priming ไว้กันเลขล็อตซ้ำตอนกรอกล็อตใหม่ */
+async function refreshActiveLots() {
   const plant_id = document.getElementById("plant-select").value;
+  if (!plant_id) { activeLotsCache = []; return; }
+  try {
+    activeLotsCache = await TissueApp.call("listActiveLots", { plant_id });
+  } catch (err) {
+    activeLotsCache = [];
+    console.warn("โหลดรายการล็อตที่กำลังติดตามไม่สำเร็จ:", err);
+  }
+}
+
+/** วาดรายการ "ล็อตที่มีอยู่" จากแคช */
+function renderActiveLots() {
   const list = document.getElementById("lot-list");
   selectedLotNo = null;
-  if (!plant_id) {
+  if (!document.getElementById("plant-select").value) {
     list.innerHTML = '<p class="muted">กรุณาเลือกชนิดพืชก่อน</p>';
     return;
   }
-  list.innerHTML = '<p class="muted">กำลังโหลด...</p>';
-  const lots = await TissueApp.call("listActiveLots", { plant_id });
-  list.innerHTML = "";
-  if (lots.length === 0) {
+  if (activeLotsCache.length === 0) {
     list.innerHTML = '<p class="muted">ชนิดนี้ยังไม่มีล็อตที่กำลังติดตามอยู่</p>';
     return;
   }
-  lots.forEach(l => {
+  list.innerHTML = "";
+  activeLotsCache.forEach(l => {
     const card = document.createElement("div");
     card.className = "card card-tap";
     card.innerHTML = `
@@ -203,6 +214,20 @@ async function loadActiveLots() {
     });
     list.appendChild(card);
   });
+}
+
+async function loadActiveLots() {
+  const plant_id = document.getElementById("plant-select").value;
+  const list = document.getElementById("lot-list");
+  selectedLotNo = null;
+  if (!plant_id) {
+    activeLotsCache = [];
+    list.innerHTML = '<p class="muted">กรุณาเลือกชนิดพืชก่อน</p>';
+    return;
+  }
+  list.innerHTML = '<p class="muted">กำลังโหลด...</p>';
+  await refreshActiveLots();
+  renderActiveLots();
 }
 
 async function loadStorage() {
@@ -225,6 +250,7 @@ async function loadPlants() {
   if (requestedId) sel.value = requestedId;
   updateTitle();
   updateLatestLotHint();
+  await refreshActiveLots();
 }
 
 function updateTitle() {
@@ -247,6 +273,7 @@ document.getElementById("plant-select").addEventListener("change", () => {
   updateTitle();
   updateLatestLotHint();
   if (lotMode === "existing") loadActiveLots();
+  else refreshActiveLots();
 });
 
 document.getElementById("save-btn").addEventListener("click", async () => {
@@ -258,6 +285,12 @@ document.getElementById("save-btn").addEventListener("click", async () => {
 
   if (!plant_id) return alert("กรุณาเลือกชนิดพืช");
   if (!lot_no) return alert(lotMode === "new" ? "กรุณาพิมพ์หมายเลขล็อต" : "กรุณาเลือกล็อตที่มีอยู่");
+  // กันเลขล็อตซ้ำตั้งแต่ฝั่งหน้าจอ: ถ้าเลือก "ล็อตใหม่" แต่พิมพ์เลขที่ยังมีล็อตกำลังติดตามอยู่ ให้เตือนทันที
+  // (backend ก็เช็คซ้ำอีกชั้นเป็นด่านสุดท้าย — ตรงนี้แค่ให้ผู้ใช้รู้ทันทีไม่ต้องรอ error กลับมา)
+  if (lotMode === "new") {
+    const dup = activeLotsCache.find(l => String(l.lot_no) === String(lot_no));
+    if (dup) return alert(`เลขล็อต ${lot_no} กำลังถูกติดตามอยู่แล้ว (${dup.stage} รอบที่ ${dup.round_no}) กรุณาใช้เลขอื่น หรือกด "เลือกล็อตที่มีอยู่" เพื่อบันทึกรอบต่อไปของล็อตนี้`);
+  }
   if (!bottleCount || Number(bottleCount) <= 0) return alert("กรุณาใส่จำนวนขวดที่ทำได้");
   if (!plantsPerBottle || Number(plantsPerBottle) <= 0) return alert("กรุณาใส่จำนวนต้นต่อขวด");
   if (!selectedMedia) return alert("กรุณาเลือกประเภทรอบนี้ (TIB หรือ SS)");
@@ -331,6 +364,7 @@ document.getElementById("record-next-btn").addEventListener("click", () => {
   selectedSub = null;
   selectedMedia = null;
   loadStorage();
+  refreshActiveLots(); // ล็อตที่เพิ่งบันทึกตอนนี้กำลังติดตามอยู่แล้ว ต้องอัปเดตแคชเพื่อกันบันทึกซ้ำเป็น "ล็อตใหม่" อีกรอบ
 });
 
 (async () => {
