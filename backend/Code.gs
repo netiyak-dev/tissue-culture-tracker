@@ -356,7 +356,7 @@ function listPlantsWithCount(payload) {
     const latestByLot = {};
     transfers.filter(t => t.plant_id === p.plant_id).forEach(t => {
       const key = t.lab + "|" + t.lot_no;
-      if (!latestByLot[key] || new Date(t.transfer_date) > new Date(latestByLot[key].transfer_date)) {
+      if (!latestByLot[key] || parseThaiDateApprox(t.transfer_date) > parseThaiDateApprox(latestByLot[key].transfer_date)) {
         latestByLot[key] = t;
       }
     });
@@ -480,7 +480,7 @@ function recordTransfer(payload) {
   );
   let previous = null;
   sameLot.forEach(t => {
-    if (t.next_transfer_date && (!previous || new Date(t.transfer_date) > new Date(previous.transfer_date))) {
+    if (t.next_transfer_date && (!previous || parseThaiDateApprox(t.transfer_date) > parseThaiDateApprox(previous.transfer_date))) {
       previous = t;
     }
   });
@@ -592,7 +592,7 @@ function computeDashboardData(transfers, plants, storage, targetDate) {
   transfers.forEach(t => {
     if (!t.lot_no) return;
     const key = t.plant_id + "|" + t.lab + "|" + t.lot_no;
-    if (!latestByLot[key] || new Date(t.transfer_date) > new Date(latestByLot[key].transfer_date)) {
+    if (!latestByLot[key] || parseThaiDateApprox(t.transfer_date) > parseThaiDateApprox(latestByLot[key].transfer_date)) {
       latestByLot[key] = t;
     }
   });
@@ -721,7 +721,7 @@ function listActiveLots(payload) {
   const latestByLot = {};
   transfers.forEach(t => {
     const key = t.lab + "|" + t.lot_no;
-    if (!latestByLot[key] || new Date(t.transfer_date) > new Date(latestByLot[key].transfer_date)) {
+    if (!latestByLot[key] || parseThaiDateApprox(t.transfer_date) > parseThaiDateApprox(latestByLot[key].transfer_date)) {
       latestByLot[key] = t;
     }
   });
@@ -756,7 +756,7 @@ function getLotHistory(payload) {
   );
   let current = null;
   transfers.forEach(t => {
-    if (!current || new Date(t.transfer_date) > new Date(current.transfer_date)) current = t;
+    if (!current || parseThaiDateApprox(t.transfer_date) > parseThaiDateApprox(current.transfer_date)) current = t;
   });
   if (!current) return [];
 
@@ -765,10 +765,10 @@ function getLotHistory(payload) {
   while (Number(cursor.round_no) > 1) {
     const targetRound = Number(cursor.round_no) - 1;
     const prevCandidates = transfers.filter(t =>
-      Number(t.round_no) === targetRound && new Date(t.transfer_date) <= new Date(cursor.transfer_date)
+      Number(t.round_no) === targetRound && parseThaiDateApprox(t.transfer_date) <= parseThaiDateApprox(cursor.transfer_date)
     );
     if (prevCandidates.length === 0) break;
-    prevCandidates.sort((a, b) => new Date(b.transfer_date) - new Date(a.transfer_date));
+    prevCandidates.sort((a, b) => parseThaiDateApprox(b.transfer_date) - parseThaiDateApprox(a.transfer_date));
     cursor = prevCandidates[0];
     chain.push(cursor);
   }
